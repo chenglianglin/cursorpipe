@@ -26,22 +26,26 @@ from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from cursorpipe._client import (
+    CompletionResult,
     StreamChunk,
     complete,
     complete_stateful,
     stream_complete,
     stream_complete_stateful,
 )
+from cursorpipe._config import settings
 from cursorpipe_server.schemas import (
     ChatCompletionChunk,
     ChatCompletionChoice,
     ChatCompletionMessage,
     ChatCompletionRequest,
     ChatCompletionResponse,
+    CompletionUsage,
     CursorMetadata,
     DeltaMessage,
     StreamChoice,
 )
+from cursorpipe_server.usage import token_usage_to_openai
 
 router = APIRouter()
 
@@ -63,6 +67,30 @@ def _last_user_message(messages: list) -> str:
 
 def _messages_as_dicts(messages: list) -> list[dict]:
     return [m.model_dump(exclude_none=True) for m in messages]
+
+
+def _include_stream_usage(body: ChatCompletionRequest) -> bool:
+    return bool(body.stream_options and body.stream_options.include_usage)
+
+
+def _openai_usage(result: CompletionResult) -> CompletionUsage | None:
+    if result.usage is None:
+        return None
+    return token_usage_to_openai(result.usage)
+
+
+def _cursor_metadata(result: CompletionResult, session_id: str | None = None) -> CursorMetadata:
+    usage = result.usage
+    return CursorMetadata(
+        duration_ms=result.duration_ms,
+        run_id=result.run_id,
+        agent_id=result.agent_id,
+        session_id=session_id,
+        thinking=result.thinking,
+        thinking_duration_ms=result.thinking_duration_ms,
+        cache_read_tokens=usage.cache_read_tokens if usage else 0,
+        cache_write_tokens=usage.cache_write_tokens if usage else 0,
+    )
 
 
 # ── Main endpoint ────────────────────────────────────────────────────────────
@@ -97,7 +125,13 @@ async def _handle_stateless(body: ChatCompletionRequest, model: str, cursor_clie
 
     if body.stream:
         return EventSourceResponse(
-            _stateless_stream_generator(messages, model, cursor_client, cursor_params),
+            _stateless_stream_generator(
+                messages,
+                model,
+                cursor_client,
+                cursor_params,
+                include_usage=_include_stream_usage(body),
+            ),
             media_type="text/event-stream",
         )
 
@@ -114,13 +148,8 @@ async def _handle_stateless(body: ChatCompletionRequest, model: str, cursor_clie
                     finish_reason=result.finish_reason,  # type: ignore[arg-type]
                 )
             ],
-            cursor_metadata=CursorMetadata(
-                duration_ms=result.duration_ms,
-                run_id=result.run_id,
-                agent_id=result.agent_id,
-                thinking=result.thinking,
-                thinking_duration_ms=result.thinking_duration_ms,
-            ),
+            usage=_openai_usage(result),
+            cursor_metadata=_cursor_metadata(result),
         ).model_dump(exclude_none=True)
     )
 
@@ -130,9 +159,12 @@ async def _stateless_stream_generator(
     model: str,
     cursor_client,
     cursor_params: dict[str, str] | None = None,
+    *,
+    include_usage: bool = False,
 ):
     completion_id = f"chatcmpl-{uuid.uuid4().hex}"
     created = int(time.time())
+    pending_usage = None
 
     # Opening chunk with role
     yield {"data": ChatCompletionChunk(
@@ -141,6 +173,9 @@ async def _stateless_stream_generator(
     ).model_dump_json(exclude_none=True)}
 
     async for chunk in stream_complete(messages, model, cursor_client, cursor_params):
+        if chunk.type == "usage":
+            pending_usage = chunk.usage
+            continue
         yield {"data": _chunk_to_sse(chunk, completion_id, created, model)}
 
     # Final stop chunk
@@ -148,6 +183,16 @@ async def _stateless_stream_generator(
         id=completion_id, created=created, model=model,
         choices=[StreamChoice(delta=DeltaMessage(), finish_reason="stop")],
     ).model_dump_json(exclude_none=True)}
+
+    if include_usage and pending_usage is not None:
+        yield {"data": ChatCompletionChunk(
+            id=completion_id,
+            created=created,
+            model=model,
+            choices=[],
+            usage=token_usage_to_openai(pending_usage),
+        ).model_dump_json(exclude_none=True)}
+
     yield {"data": "[DONE]"}
 
 
@@ -173,7 +218,12 @@ async def _handle_stateful(
 
     if body.stream:
         return EventSourceResponse(
-            _stateful_stream_generator(entry, last_msg, model),
+            _stateful_stream_generator(
+                entry,
+                last_msg,
+                model,
+                include_usage=_include_stream_usage(body),
+            ),
             media_type="text/event-stream",
             headers=response_headers,
         )
@@ -191,22 +241,23 @@ async def _handle_stateful(
                     finish_reason=result.finish_reason,  # type: ignore[arg-type]
                 )
             ],
-            cursor_metadata=CursorMetadata(
-                duration_ms=result.duration_ms,
-                run_id=result.run_id,
-                agent_id=result.agent_id,
-                session_id=entry.session_id,
-                thinking=result.thinking,
-                thinking_duration_ms=result.thinking_duration_ms,
-            ),
+            usage=_openai_usage(result),
+            cursor_metadata=_cursor_metadata(result, session_id=entry.session_id),
         ).model_dump(exclude_none=True),
         headers=response_headers,
     )
 
 
-async def _stateful_stream_generator(entry, last_user_message: str, model: str):
+async def _stateful_stream_generator(
+    entry,
+    last_user_message: str,
+    model: str,
+    *,
+    include_usage: bool = False,
+):
     completion_id = f"chatcmpl-{uuid.uuid4().hex}"
     created = int(time.time())
+    pending_usage = None
 
     yield {"data": ChatCompletionChunk(
         id=completion_id, created=created, model=model,
@@ -214,12 +265,25 @@ async def _stateful_stream_generator(entry, last_user_message: str, model: str):
     ).model_dump_json(exclude_none=True)}
 
     async for chunk in stream_complete_stateful(entry, last_user_message):
+        if chunk.type == "usage":
+            pending_usage = chunk.usage
+            continue
         yield {"data": _chunk_to_sse(chunk, completion_id, created, model)}
 
     yield {"data": ChatCompletionChunk(
         id=completion_id, created=created, model=model,
         choices=[StreamChoice(delta=DeltaMessage(), finish_reason="stop")],
     ).model_dump_json(exclude_none=True)}
+
+    if include_usage and pending_usage is not None:
+        yield {"data": ChatCompletionChunk(
+            id=completion_id,
+            created=created,
+            model=model,
+            choices=[],
+            usage=token_usage_to_openai(pending_usage),
+        ).model_dump_json(exclude_none=True)}
+
     yield {"data": "[DONE]"}
 
 

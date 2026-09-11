@@ -18,15 +18,20 @@ class ChatMessage(BaseModel):
     name: str | None = None
 
 
+class StreamOptions(BaseModel):
+    include_usage: bool = False
+
+
 class ChatCompletionRequest(BaseModel):
-    # Accept and silently ignore unknown OpenAI fields (stream_options,
-    # logit_bias, top_p, frequency_penalty, etc.) so clients never get 422s
-    # for fields cursorpipe doesn't implement.
+    # Accept and silently ignore unknown OpenAI fields (logit_bias, top_p,
+    # frequency_penalty, etc.) so clients never get 422s for fields we
+    # don't implement.
     model_config = ConfigDict(extra="ignore")
 
     model: str = Field(default="composer-2.5")
     messages: list[ChatMessage] = Field(min_length=1)
     stream: bool = False
+    stream_options: StreamOptions | None = None
     temperature: float | None = None
     max_tokens: int | None = None
     # cursorpipe extension: per-request Cursor SDK model parameters.
@@ -58,6 +63,24 @@ class CursorMetadata(BaseModel):
     session_id: str | None = None
     thinking: str | None = None
     thinking_duration_ms: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+
+
+class CompletionTokensDetails(BaseModel):
+    reasoning_tokens: int | None = None
+
+
+class PromptTokensDetails(BaseModel):
+    cached_tokens: int | None = None
+
+
+class CompletionUsage(BaseModel):
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    completion_tokens_details: CompletionTokensDetails | None = None
+    prompt_tokens_details: PromptTokensDetails | None = None
 
 
 class ChatCompletionResponse(BaseModel):
@@ -66,6 +89,7 @@ class ChatCompletionResponse(BaseModel):
     created: int = Field(default_factory=lambda: int(time.time()))
     model: str
     choices: list[ChatCompletionChoice]
+    usage: CompletionUsage | None = None
     cursor_metadata: CursorMetadata = Field(default_factory=CursorMetadata)
 
 
@@ -90,6 +114,7 @@ class ChatCompletionChunk(BaseModel):
     created: int = Field(default_factory=lambda: int(time.time()))
     model: str
     choices: list[StreamChoice]
+    usage: CompletionUsage | None = None
 
 
 # ── Models endpoint ──────────────────────────────────────────────────────────────

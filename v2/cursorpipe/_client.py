@@ -21,6 +21,7 @@ from cursorpipe._config import settings
 
 if TYPE_CHECKING:
     from cursor_sdk import AsyncClient
+    from cursor_sdk.types import TokenUsage
 
     from cursorpipe._session_store import SessionEntry
 
@@ -42,15 +43,17 @@ class CompletionResult:
     agent_id: str | None = None
     thinking: str | None = None
     thinking_duration_ms: int = 0
+    usage: "TokenUsage | None" = None
 
 
 @dataclass
 class StreamChunk:
     """A single chunk yielded during streaming."""
 
-    type: Literal["text", "thinking"]
-    text: str
+    type: Literal["text", "thinking", "usage"]
+    text: str = ""
     thinking_duration_ms: int = 0
+    usage: "TokenUsage | None" = None
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -89,6 +92,23 @@ def _agent_options(model: str, cursor_params: dict[str, str] | None = None) -> A
 def _map_status(status: str) -> str:
     """Map SDK RunResult.status to OpenAI finish_reason."""
     return "stop"  # SDK doesn't distinguish length cutoffs; all terminal states → stop
+
+
+async def _resolve_run_usage(run) -> "TokenUsage | None":
+    """Return cumulative token usage after a run finishes."""
+    usage = getattr(run, "usage", None)
+    if usage is not None:
+        return usage
+
+    wait = getattr(run, "wait", None)
+    if wait is not None:
+        try:
+            await wait()
+        except Exception:
+            logger.debug("run.wait() failed while resolving usage", exc_info=True)
+        return getattr(run, "usage", None)
+
+    return None
 
 
 def _flatten_messages(messages: list[dict]) -> tuple[str, str]:
@@ -180,6 +200,7 @@ async def complete(
             agent_id=getattr(run, "agent_id", None),
             thinking=thinking if has_thinking else None,
             thinking_duration_ms=thinking_ms if has_thinking else 0,
+            usage=await _resolve_run_usage(run),
         )
     finally:
         await _close_agent(agent)
@@ -214,6 +235,10 @@ async def stream_complete(
                                 yield StreamChunk(type="text", text=block.text)
             except Exception:
                 pass
+
+        usage = await _resolve_run_usage(run)
+        if usage is not None:
+            yield StreamChunk(type="usage", usage=usage)
     finally:
         await _close_agent(agent)
 
@@ -245,6 +270,7 @@ async def complete_stateful(
         agent_id=getattr(run, "agent_id", None),
         thinking=thinking if settings.thinking_param else None,
         thinking_duration_ms=thinking_ms if settings.thinking_param else 0,
+        usage=await _resolve_run_usage(run),
     )
 
 
@@ -269,6 +295,11 @@ async def stream_complete_stateful(
                             yield StreamChunk(type="text", text=block.text)
         except Exception:
             pass
+
+    usage = await _resolve_run_usage(run)
+    if usage is not None:
+        yield StreamChunk(type="usage", usage=usage)
+
     session_entry.touch()
 
 

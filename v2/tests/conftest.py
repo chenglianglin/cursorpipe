@@ -65,6 +65,18 @@ def mock_run(mock_message):
     run.id = "run-test-abc"
     run.agent_id = "agent-test-xyz"
     run.model = None  # actual_model falls back to the requested model
+
+    from cursor_sdk.types import TokenUsage
+
+    run.usage = TokenUsage(
+        input_tokens=12,
+        output_tokens=7,
+        cache_read_tokens=3,
+        cache_write_tokens=1,
+        total_tokens=19,
+        reasoning_tokens=2,
+    )
+    run.wait = AsyncMock(return_value=None)
     return run
 
 

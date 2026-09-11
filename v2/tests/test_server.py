@@ -115,6 +115,15 @@ class TestChatCompletionsStateless:
         body = response.json()
         assert "cursor_metadata" in body
 
+    async def test_non_streaming_includes_usage(self, app_client) -> None:
+        response = await app_client.post("/v1/chat/completions", json=self._payload)
+        body = response.json()
+        assert body["usage"]["prompt_tokens"] == 12
+        assert body["usage"]["completion_tokens"] == 7
+        assert body["usage"]["total_tokens"] == 19
+        assert body["cursor_metadata"]["cache_read_tokens"] == 3
+        assert body["cursor_metadata"]["cache_write_tokens"] == 1
+
     async def test_non_streaming_finish_reason(self, app_client) -> None:
         response = await app_client.post("/v1/chat/completions", json=self._payload)
         body = response.json()
@@ -190,6 +199,24 @@ class TestChatCompletionsStateless:
         data_lines = [l for l in raw.splitlines() if l.startswith("data:") and "[DONE]" not in l]
         last_chunk = json.loads(data_lines[-1].removeprefix("data:").strip())
         assert last_chunk["choices"][0]["finish_reason"] == "stop"
+
+    async def test_streaming_include_usage_emits_usage_chunk(self, app_client) -> None:
+        response = await app_client.post(
+            "/v1/chat/completions",
+            json={
+                **self._payload,
+                "stream": True,
+                "stream_options": {"include_usage": True},
+            },
+        )
+        raw = response.text
+        data_lines = [l for l in raw.splitlines() if l.startswith("data:") and "[DONE]" not in l]
+        chunks = [json.loads(line.removeprefix("data:").strip()) for line in data_lines]
+        usage_chunks = [chunk for chunk in chunks if chunk.get("usage")]
+        assert len(usage_chunks) == 1
+        assert usage_chunks[0]["usage"]["prompt_tokens"] == 12
+        assert usage_chunks[0]["usage"]["completion_tokens"] == 7
+        assert chunks[-1]["usage"]["total_tokens"] == 19
 
 
 # =========================================================================

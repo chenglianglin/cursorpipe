@@ -436,6 +436,32 @@ class TestResultDataclasses:
         assert chunk.thinking_duration_ms == 300
 
 
+@pytest.mark.unit
+class TestUsageMapping:
+    def test_token_usage_to_openai(self) -> None:
+        from cursor_sdk.types import TokenUsage
+
+        from cursorpipe_server.usage import token_usage_to_openai
+
+        usage = token_usage_to_openai(
+            TokenUsage(
+                input_tokens=100,
+                output_tokens=50,
+                cache_read_tokens=20,
+                cache_write_tokens=5,
+                total_tokens=150,
+                reasoning_tokens=10,
+            )
+        )
+        assert usage.prompt_tokens == 100
+        assert usage.completion_tokens == 50
+        assert usage.total_tokens == 150
+        assert usage.prompt_tokens_details is not None
+        assert usage.prompt_tokens_details.cached_tokens == 20
+        assert usage.completion_tokens_details is not None
+        assert usage.completion_tokens_details.reasoning_tokens == 10
+
+
 # =========================================================================
 # SessionEntry
 # =========================================================================
@@ -558,16 +584,26 @@ class TestSchemas:
     def test_request_ignores_unknown_fields(self) -> None:
         from cursorpipe_server.schemas import ChatCompletionRequest
 
-        # These OpenAI fields are not implemented in v2 but must not cause 422
+        # Unknown OpenAI fields must not cause 422
         req = ChatCompletionRequest(
             model="composer-2.5",
             messages=[{"role": "user", "content": "hi"}],
-            stream_options={"include_usage": True},
             logit_bias={"50256": -100},
             top_p=0.9,
             frequency_penalty=0.5,
         )
         assert req.model == "composer-2.5"
+
+    def test_request_parses_stream_options(self) -> None:
+        from cursorpipe_server.schemas import ChatCompletionRequest
+
+        req = ChatCompletionRequest(
+            model="composer-2.5",
+            messages=[{"role": "user", "content": "hi"}],
+            stream_options={"include_usage": True},
+        )
+        assert req.stream_options is not None
+        assert req.stream_options.include_usage is True
 
     def test_request_requires_messages(self) -> None:
         from cursorpipe_server.schemas import ChatCompletionRequest
