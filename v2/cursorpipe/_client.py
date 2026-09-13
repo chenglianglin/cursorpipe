@@ -15,9 +15,9 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from cursor_sdk import AgentOptions, LocalAgentOptions, ModelParameterValue, ModelSelection
+from cursor_sdk import AgentOptions, ModelParameterValue, ModelSelection
 
-from cursorpipe._config import settings
+from cursorpipe._config import local_agent_options, settings
 
 if TYPE_CHECKING:
     from cursor_sdk import AsyncClient
@@ -85,7 +85,7 @@ def _agent_options(model: str, cursor_params: dict[str, str] | None = None) -> A
     return AgentOptions(
         model=model_sel,
         api_key=settings.cursor_api_key or None,
-        local=LocalAgentOptions(cwd=settings.workspace),
+        local=local_agent_options(),
     )
 
 

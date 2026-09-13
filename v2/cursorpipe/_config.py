@@ -91,3 +91,13 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def local_agent_options():
+    """Shared LocalAgentOptions for all SDK agents in this server."""
+    from cursor_sdk import LocalAgentOptions
+
+    return LocalAgentOptions(
+        cwd=settings.workspace,
+        setting_sources=["project"],
+    )

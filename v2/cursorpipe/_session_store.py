@@ -16,9 +16,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
-from cursor_sdk import LocalAgentOptions, ModelParameterValue, ModelSelection
+from cursor_sdk import ModelParameterValue, ModelSelection
 
-from cursorpipe._config import settings
+from cursorpipe._config import local_agent_options, settings
 
 if TYPE_CHECKING:
     from cursor_sdk import AsyncAgent, AsyncClient
@@ -100,7 +100,7 @@ class SessionStore:
             agent = await cursor_client.agents.create(
                 model=model_sel,
                 api_key=settings.cursor_api_key or None,
-                local=LocalAgentOptions(cwd=settings.workspace),
+                local=local_agent_options(),
             )
             entry = SessionEntry(session_id=session_id, agent=agent, model=model)
             self._sessions[session_id] = entry

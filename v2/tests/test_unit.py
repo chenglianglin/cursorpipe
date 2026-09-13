@@ -87,6 +87,13 @@ class TestConfig:
         s = Settings(_env_file=None)
         assert s.cursor_api_key == "crsr_test123"
 
+    def test_local_agent_options_includes_project_setting_sources(self) -> None:
+        from cursorpipe._config import local_agent_options, settings
+
+        opts = local_agent_options()
+        assert opts.cwd == settings.workspace
+        assert list(opts.setting_sources or ()) == ["project"]
+
 
 # =========================================================================
 # Thinking / thinking_level config
