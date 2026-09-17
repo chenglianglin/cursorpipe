@@ -129,8 +129,10 @@ def _flatten_messages(messages: list[dict]) -> tuple[str, str]:
                 for block in content
                 if block.get("type") == "text"
             )
-        if role in ("system", "developer"):
+        if role in ("system", "developer") or str(role).lower() in ("developer",):
             system_parts.append(content)
+        elif str(role).lower() in ("toolresult", "tool_result"):
+            prompt_parts.append(f"tool: {content}")
         else:
             prompt_parts.append(f"{role}: {content}")
 

@@ -59,7 +59,11 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
     if errors:
         first = errors[0]
         loc = " → ".join(str(l) for l in first.get("loc", []))
-        message = f"{loc}: {first.get('msg', 'validation error')}" if loc else first.get("msg", "validation error")
+        msg = first.get("msg", "validation error")
+        invalid_input = first.get("input")
+        if invalid_input is not None and loc.endswith("role"):
+            msg = f"{msg} (received {invalid_input!r})"
+        message = f"{loc}: {msg}" if loc else msg
     else:
         message = "Invalid request"
 

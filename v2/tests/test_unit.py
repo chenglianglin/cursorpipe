@@ -673,6 +673,15 @@ class TestChatMessageRoleNormalization:
         )
         assert req.messages[0].role == "tool"
 
+    def test_tool_result_camel_case_maps_to_tool(self) -> None:
+        from cursorpipe_server.schemas import ChatCompletionRequest
+
+        req = ChatCompletionRequest(
+            model="gpt-5.6",
+            messages=[{"role": "toolResult", "content": "ok", "name": "x"}],
+        )
+        assert req.messages[0].role == "tool"
+
     def test_unknown_role_still_rejected(self) -> None:
         import pytest
         from pydantic import ValidationError
@@ -770,6 +779,27 @@ class TestErrorHandlers:
         assert response.status_code == 422
         assert "error" in body
         assert body["error"]["type"] == "invalid_request_error"
+
+    async def test_validation_error_includes_received_role(self) -> None:
+        from fastapi.exceptions import RequestValidationError
+
+        from cursorpipe_server.errors import validation_error_handler
+
+        exc = RequestValidationError(
+            errors=[
+                {
+                    "loc": ("body", "messages", 0, "role"),
+                    "msg": "Input should be 'system', 'user', 'assistant' or 'tool'",
+                    "type": "literal_error",
+                    "input": "model",
+                }
+            ]
+        )
+        response = await validation_error_handler(MagicMock(), exc)
+        import json
+
+        body = json.loads(response.body)
+        assert "received 'model'" in body["error"]["message"]
 
     async def test_generic_error_returns_500(self) -> None:
         from cursorpipe_server.errors import generic_error_handler

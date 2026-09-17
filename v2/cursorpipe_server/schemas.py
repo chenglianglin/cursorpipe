@@ -6,25 +6,44 @@ import time
 import uuid
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # ── Request ─────────────────────────────────────────────────────────────────────
+
+_ROLE_ALIASES: dict[str, Literal["system", "user", "assistant", "tool"]] = {
+    "developer": "system",
+    "function": "tool",
+    "toolresult": "tool",
+    "tool_result": "tool",
+}
+
+# Exposed via /health so operators can confirm a running instance has role normalization.
+MESSAGE_ROLE_ALIASES = tuple(sorted(_ROLE_ALIASES))
+
 
 def normalize_chat_message_role(role: object) -> object:
     """Map OpenAI-compatible alias roles before strict validation.
 
     GPT-5 / OpenClaw often send ``developer`` instead of ``system``.
     Legacy clients may send ``function`` instead of ``tool``.
+    Pi-style transcripts may use ``toolResult`` (camelCase).
     """
+    if isinstance(role, list):
+        role = role[0] if role else None
+    if role is None or role == "":
+        return "user"
     if not isinstance(role, str):
         return role
-    normalized = role.strip().lower()
-    if normalized == "developer":
-        return "system"
-    if normalized == "function":
+    stripped = role.strip()
+    normalized = stripped.lower()
+    mapped = _ROLE_ALIASES.get(normalized)
+    if mapped is not None:
+        return mapped
+    # camelCase toolResult → toolresult after lower(); handle explicit camelCase too.
+    if stripped == "toolResult":
         return "tool"
-    return normalized
+    return stripped
 
 
 class ChatMessage(BaseModel):
@@ -50,6 +69,26 @@ class ChatCompletionRequest(BaseModel):
 
     model: str = Field(default="composer-2.5")
     messages: list[ChatMessage] = Field(min_length=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_messages_roles(cls, data: Any) -> Any:
+        """Normalize roles on raw JSON before nested ChatMessage validation."""
+        if not isinstance(data, dict):
+            return data
+        raw_messages = data.get("messages")
+        if not isinstance(raw_messages, list):
+            return data
+        normalized_messages: list[Any] = []
+        for item in raw_messages:
+            if isinstance(item, dict):
+                msg = dict(item)
+                if "role" in msg:
+                    msg["role"] = normalize_chat_message_role(msg["role"])
+                normalized_messages.append(msg)
+            else:
+                normalized_messages.append(item)
+        return {**data, "messages": normalized_messages}
     stream: bool = False
     stream_options: StreamOptions | None = None
     temperature: float | None = None

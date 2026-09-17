@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from cursorpipe_server.schemas import MESSAGE_ROLE_ALIASES
+
 router = APIRouter()
 
 
@@ -15,6 +17,10 @@ async def health(request: Request) -> JSONResponse:
     bridge_str = "connected" if bridge_ok else "unavailable"
     http_status = 200 if bridge_ok else 503
     return JSONResponse(
-        {"status": status_str, "bridge": bridge_str},
+        {
+            "status": status_str,
+            "bridge": bridge_str,
+            "message_role_aliases": list(MESSAGE_ROLE_ALIASES),
+        },
         status_code=http_status,
     )
