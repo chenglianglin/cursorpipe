@@ -143,6 +143,20 @@ class TestChatCompletionsStateless:
         )
         assert response.status_code == 200
 
+    async def test_developer_role_accepted(self, app_client) -> None:
+        """GPT-5 / OpenClaw may send developer instead of system."""
+        response = await app_client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "gpt-5.6",
+                "messages": [
+                    {"role": "developer", "content": "You are helpful."},
+                    {"role": "user", "content": "hi"},
+                ],
+            },
+        )
+        assert response.status_code == 200
+
     async def test_missing_messages_returns_openai_422(self, app_client) -> None:
         """Missing required field must return OpenAI-shaped 422, not FastAPI default."""
         response = await app_client.post(

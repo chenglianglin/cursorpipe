@@ -6,16 +6,36 @@ import time
 import uuid
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # ── Request ─────────────────────────────────────────────────────────────────────
+
+def normalize_chat_message_role(role: object) -> object:
+    """Map OpenAI-compatible alias roles before strict validation.
+
+    GPT-5 / OpenClaw often send ``developer`` instead of ``system``.
+    Legacy clients may send ``function`` instead of ``tool``.
+    """
+    if not isinstance(role, str):
+        return role
+    normalized = role.strip().lower()
+    if normalized == "developer":
+        return "system"
+    if normalized == "function":
+        return "tool"
+    return normalized
 
 
 class ChatMessage(BaseModel):
     role: Literal["system", "user", "assistant", "tool"] = "user"
     content: str | list[dict[str, Any]] | None = None
     name: str | None = None
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def _normalize_role(cls, role: object) -> object:
+        return normalize_chat_message_role(role)
 
 
 class StreamOptions(BaseModel):

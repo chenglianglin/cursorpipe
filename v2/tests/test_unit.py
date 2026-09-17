@@ -649,6 +649,44 @@ class TestSchemas:
 
 
 # =========================================================================
+# Message role normalization
+# =========================================================================
+
+
+@pytest.mark.unit
+class TestChatMessageRoleNormalization:
+    def test_developer_maps_to_system(self) -> None:
+        from cursorpipe_server.schemas import ChatCompletionRequest
+
+        req = ChatCompletionRequest(
+            model="gpt-5.6",
+            messages=[{"role": "developer", "content": "Be concise."}],
+        )
+        assert req.messages[0].role == "system"
+
+    def test_function_maps_to_tool(self) -> None:
+        from cursorpipe_server.schemas import ChatCompletionRequest
+
+        req = ChatCompletionRequest(
+            model="composer-2.5",
+            messages=[{"role": "function", "content": "{}", "name": "get_weather"}],
+        )
+        assert req.messages[0].role == "tool"
+
+    def test_unknown_role_still_rejected(self) -> None:
+        import pytest
+        from pydantic import ValidationError
+
+        from cursorpipe_server.schemas import ChatCompletionRequest
+
+        with pytest.raises(ValidationError):
+            ChatCompletionRequest(
+                model="composer-2.5",
+                messages=[{"role": "model", "content": "nope"}],
+            )
+
+
+# =========================================================================
 # cursor_params request field
 # =========================================================================
 
