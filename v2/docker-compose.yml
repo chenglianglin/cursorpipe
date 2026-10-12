@@ -1,6 +1,11 @@
 services:
   cursorpipe:
     build: .
+    env_file:
+      - .env
+    volumes:
+      - /opt/workspace:/opt/workspace
+      - /home/simon/.cursor:/root/.cursor
     ports:
       - "8080:8080"
     environment:
@@ -19,16 +24,16 @@ services:
 
       # Agent
       - CURSORPIPE_MODEL=composer-2.5
-      - CURSORPIPE_WORKSPACE=/app
+      - CURSORPIPE_WORKSPACE=/opt/workspace
 
       # Sessions
       - CURSORPIPE_SESSION_TTL_MINUTES=30
 
       # Features
-      - CURSORPIPE_EXPOSE_THINKING=false
+      - CURSORPIPE_EXPOSE_THINKING=low
 
       # Logging (debug | info | warning | error | critical)
-      - CURSORPIPE_LOG_LEVEL=info
+      - CURSORPIPE_LOG_LEVEL=error
 
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
