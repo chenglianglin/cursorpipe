@@ -10,6 +10,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from cursorpipe._config import settings
+from cursorpipe._request_log import log_incoming_headers
+
 logger = logging.getLogger("cursorpipe.access")
 
 REQUEST_ID_HEADER = "X-Request-ID"
@@ -32,6 +35,12 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             request.method,
             request.url.path,
             request_id,
+        )
+        log_incoming_headers(
+            request,
+            request_id=request_id,
+            enabled=settings.effective_log_request_headers,
+            explicit_override=settings.log_request_headers,
         )
 
         response: Response = await call_next(request)

@@ -24,6 +24,7 @@ async def health(request: Request) -> JSONResponse:
             "message_role_aliases": list(MESSAGE_ROLE_ALIASES),
             "session_user_id_env": settings.session_user_id_env,
             "session_user_id_env_var": settings.session_user_id_env_var,
+            "log_request_headers": settings.effective_log_request_headers,
         },
         status_code=http_status,
     )

@@ -159,7 +159,8 @@ All settings are read from environment variables (or `.env` file).
 | `CURSORPIPE_SESSION_USER_ID_ENV` | `true` | Inject shell env for stateful requests (see below) |
 | `CURSORPIPE_SESSION_USER_ID_ENV_VAR` | `X_USER_ID` | Env var name forwarded to the local agent |
 | `CURSORPIPE_THINKING_LEVEL` | `off` | Request and surface thinking: `off`, `low`, or `high`. Backward compat: `CURSORPIPE_EXPOSE_THINKING=true` maps to `high`. |
-| `CURSORPIPE_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warning`, `error`, `critical` |
+| `CURSORPIPE_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warning`, `error`, `critical`. At `debug`, logs sanitized request headers. |
+| `CURSORPIPE_LOG_REQUEST_HEADERS` | *(unset)* | `true` = log headers at info; `false` = never; unset = follow log level |
 
 ---
 

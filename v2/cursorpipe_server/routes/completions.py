@@ -18,6 +18,7 @@ delta.reasoning_content (streaming) or cursor_metadata.thinking (non-streaming).
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 
@@ -48,9 +49,37 @@ from cursorpipe_server.schemas import (
 from cursorpipe_server.usage import token_usage_to_openai
 
 router = APIRouter()
+logger = logging.getLogger("cursorpipe.completions")
 
 SESSION_HEADER = "X-Cursor-Session-ID"
 USER_ID_HEADER = "X-User-Id"
+
+
+def _log_stateful_routing_debug(
+    session_id: str,
+    x_user_id_raw: str | None,
+    user_id_value: str,
+) -> None:
+    from cursorpipe._config import settings as app_settings
+
+    if not app_settings.effective_log_request_headers:
+        return
+    level = (
+        logging.INFO
+        if app_settings.log_request_headers is True
+        else logging.DEBUG
+    )
+    if not logger.isEnabledFor(level):
+        return
+    logger.log(
+        level,
+        "[stateful] session_id=%r  x_user_id_header=%r  resolved_user_id=%r  "
+        "env_var=%s",
+        session_id,
+        x_user_id_raw,
+        user_id_value,
+        app_settings.session_user_id_env_var,
+    )
 
 
 def _last_user_message(messages: list) -> str:
@@ -109,9 +138,13 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
     if is_stateful:
         from cursorpipe._session_env import resolve_user_id_value
 
+        x_user_id_raw = request.headers.get(USER_ID_HEADER)
         user_id_value = resolve_user_id_value(
             incoming_session_id,
-            request.headers.get(USER_ID_HEADER),
+            x_user_id_raw,
+        )
+        _log_stateful_routing_debug(
+            incoming_session_id, x_user_id_raw, user_id_value
         )
         return await _handle_stateful(
             body=body,

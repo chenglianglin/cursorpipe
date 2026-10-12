@@ -96,6 +96,34 @@ class TestConfig:
 
 
 @pytest.mark.unit
+class TestRequestHeaderLogging:
+    def test_effective_log_request_headers_follows_log_level(self) -> None:
+        from cursorpipe._config import Settings
+
+        info = Settings(_env_file=None, log_level="info", log_request_headers=None)
+        assert info.effective_log_request_headers is False
+        debug = Settings(_env_file=None, log_level="debug", log_request_headers=None)
+        assert debug.effective_log_request_headers is True
+
+    def test_log_request_headers_override(self) -> None:
+        from cursorpipe._config import Settings
+
+        forced = Settings(
+            _env_file=None, log_level="info", log_request_headers=True
+        )
+        assert forced.effective_log_request_headers is True
+        off = Settings(
+            _env_file=None, log_level="debug", log_request_headers=False
+        )
+        assert off.effective_log_request_headers is False
+
+    def test_redact_authorization(self) -> None:
+        from cursorpipe._request_log import _redact_header_value
+
+        assert _redact_header_value("Authorization", "Bearer secret") == "<redacted>"
+
+
+@pytest.mark.unit
 class TestSessionUserEnv:
     def test_resolve_user_id_prefers_x_user_id_header(self) -> None:
         from cursorpipe._session_env import resolve_user_id_value

@@ -86,6 +86,12 @@ class Settings(BaseSettings):
     # Accepts: debug, info, warning, error, critical
     log_level: str = Field(default="info")
 
+    # Log sanitized incoming HTTP headers on each request.
+    # unset (None): enable only when CURSORPIPE_LOG_LEVEL=debug
+    # true: always log headers (at DEBUG) even if log level is info — use sparingly
+    # false: never log headers, even when log level is debug
+    log_request_headers: bool | None = Field(default=None)
+
     @property
     def thinking_param(self) -> str | None:
         """Return the SDK thinking parameter value, or None if thinking is off."""
@@ -97,6 +103,13 @@ class Settings(BaseSettings):
         if self.cors_origins.strip() == "*":
             return ["*"]
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def effective_log_request_headers(self) -> bool:
+        """Whether middleware should emit sanitized request header debug lines."""
+        if self.log_request_headers is not None:
+            return self.log_request_headers
+        return self.log_level.lower().strip() == "debug"
 
 
 settings = Settings()
