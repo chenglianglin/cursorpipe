@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Mapping
 
 from starlette.requests import Request
 
@@ -56,47 +55,33 @@ def session_headers_for_log(request: Request) -> dict[str, str]:
     return found
 
 
-def _header_log_level(explicit_override: bool | None) -> int:
-    """INFO when headers forced on; DEBUG when following log_level=debug."""
-    if explicit_override is True:
-        return logging.INFO
-    return logging.DEBUG
-
-
 def log_incoming_headers(
     request: Request,
     *,
     request_id: str,
     enabled: bool,
-    explicit_override: bool | None = None,
 ) -> None:
     """Emit sanitized header lines when header logging is enabled."""
-    if not enabled:
-        return
-
-    level = _header_log_level(explicit_override)
-    if not logger.isEnabledFor(level):
+    if not enabled or not logger.isEnabledFor(logging.INFO):
         return
 
     session = session_headers_for_log(request)
     if session:
-        logger.log(
-            level,
+        logger.info(
             "[HEADERS] request_id=%s  session=%s",
             request_id,
             session,
         )
     else:
-        logger.log(
-            level,
+        logger.info(
             "[HEADERS] request_id=%s  session=<none>  "
             "(no X-Cursor-Session-ID / X-User-Id)",
             request_id,
         )
 
-    logger.log(
-        level,
-        "[HEADERS] request_id=%s  all=%s",
-        request_id,
-        headers_for_log(request),
-    )
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "[HEADERS] request_id=%s  all=%s",
+            request_id,
+            headers_for_log(request),
+        )

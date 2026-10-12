@@ -1,22 +1,14 @@
 """CLI entry point: `cursorpipe-server` or `python -m cursorpipe_server`."""
 
-import logging
-
 import uvicorn
 
 from cursorpipe._config import settings
+from cursorpipe._logging_setup import configure_logging
 
 
 def main() -> None:
     log_level = settings.log_level.lower()
-
-    # Configure Python's stdlib logging so all loggers (including
-    # cursorpipe.*) respect the chosen level.
-    logging.basicConfig(
-        level=log_level.upper(),
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%Y-%m-%dT%H:%M:%S",
-    )
+    configure_logging()
 
     uvicorn.run(
         "cursorpipe_server.app:app",

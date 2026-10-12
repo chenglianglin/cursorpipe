@@ -33,7 +33,9 @@ services:
       - CURSORPIPE_EXPOSE_THINKING=low
 
       # Logging (debug | info | warning | error | critical)
-      - CURSORPIPE_LOG_LEVEL=error
+      - CURSORPIPE_LOG_LEVEL=info
+      # Session / user headers at INFO when true (works even if LOG_LEVEL=error)
+      - CURSORPIPE_LOG_REQUEST_HEADERS=true
 
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]

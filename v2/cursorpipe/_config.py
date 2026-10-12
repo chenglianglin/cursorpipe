@@ -88,7 +88,7 @@ class Settings(BaseSettings):
 
     # Log sanitized incoming HTTP headers on each request.
     # unset (None): enable only when CURSORPIPE_LOG_LEVEL=debug
-    # true: always log headers (at DEBUG) even if log level is info — use sparingly
+    # true: log session headers at INFO even when log level is error/warning
     # false: never log headers, even when log level is debug
     log_request_headers: bool | None = Field(default=None)
 

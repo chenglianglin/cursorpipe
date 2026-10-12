@@ -64,15 +64,9 @@ def _log_stateful_routing_debug(
 
     if not app_settings.effective_log_request_headers:
         return
-    level = (
-        logging.INFO
-        if app_settings.log_request_headers is True
-        else logging.DEBUG
-    )
-    if not logger.isEnabledFor(level):
+    if not logger.isEnabledFor(logging.INFO):
         return
-    logger.log(
-        level,
+    logger.info(
         "[stateful] session_id=%r  x_user_id_header=%r  resolved_user_id=%r  "
         "env_var=%s",
         session_id,
