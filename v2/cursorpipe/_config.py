@@ -1,3 +1,5 @@
+import os
+
 from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -48,6 +50,14 @@ class Settings(BaseSettings):
 
     # Shell/env name forwarded to the agent (curl: -H "x-user-id: $X_USER_ID").
     session_user_id_env_var: str = Field(default="X_USER_ID")
+
+    # Per-user agent working directory under CURSORPIPE_WORKSPACE (stateful).
+    # off    — all sessions use workspace root (default)
+    # subdir — cwd = workspace/<user_workspace_subdir>/<sanitized X-User-Id or session id>
+    user_workspace_mode: str = Field(default="off")
+    user_workspace_subdir: str = Field(default=".cursorpipe/users")
+    # When subdir mode: also load project rules/skills from workspace root via dirs.
+    user_workspace_mount_project_root: bool = Field(default=True)
 
     # ── Thinking / reasoning ───────────────────────────────────────────────────
     # Controls whether thinking is requested from the SDK AND surfaced in
@@ -135,12 +145,8 @@ def local_agent_options_for_session(
     *,
     user_id_value: str | None = None,
 ) -> dict | object:
-    """Local options with per-session envVars when session_user_id_env is enabled."""
+    """Local options for a stateful session (optional per-user cwd + envVars)."""
     from cursor_sdk import LocalAgentOptions
-
-    base = local_agent_options()
-    if not settings.session_user_id_env:
-        return base
 
     from cursorpipe._session_env import (
         merge_local_options_with_env,
@@ -148,8 +154,22 @@ def local_agent_options_for_session(
         session_env_vars,
         write_session_env_file,
     )
+    from cursorpipe._user_workspace import resolve_workspace_layout
 
-    value = user_id_value if user_id_value is not None else resolve_user_id_value(session_id)
+    layout = resolve_workspace_layout(session_id, user_id_value)
+    opts = LocalAgentOptions(
+        cwd=os.fspath(layout.cwd),
+        dirs=[os.fspath(p) for p in layout.dirs] if layout.dirs else None,
+        setting_sources=["project"],
+    )
+    wire = opts.to_json()
+
+    if not settings.session_user_id_env:
+        return wire
+
+    value = user_id_value if user_id_value is not None else resolve_user_id_value(
+        session_id
+    )
     env_vars = session_env_vars(value)
-    env_file = write_session_env_file(settings.workspace, session_id, env_vars)
-    return merge_local_options_with_env(base.to_json(), env_vars, env_file)
+    env_file = write_session_env_file(layout.env_files_root, session_id, env_vars)
+    return merge_local_options_with_env(wire, env_vars, env_file)

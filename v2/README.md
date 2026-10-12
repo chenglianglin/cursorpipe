@@ -158,6 +158,9 @@ All settings are read from environment variables (or `.env` file).
 | `CURSORPIPE_SESSION_TTL_MINUTES` | `30` | Idle session expiry |
 | `CURSORPIPE_SESSION_USER_ID_ENV` | `true` | Inject shell env for stateful requests (see below) |
 | `CURSORPIPE_SESSION_USER_ID_ENV_VAR` | `X_USER_ID` | Env var name forwarded to the local agent |
+| `CURSORPIPE_USER_WORKSPACE_MODE` | `off` | `subdir` = per-user cwd under workspace (uses `X-User-Id`) |
+| `CURSORPIPE_USER_WORKSPACE_SUBDIR` | `.cursorpipe/users` | Parent folder for per-user dirs |
+| `CURSORPIPE_USER_WORKSPACE_MOUNT_PROJECT_ROOT` | `true` | Load rules from workspace root via `dirs` |
 | `CURSORPIPE_THINKING_LEVEL` | `off` | Request and surface thinking: `off`, `low`, or `high`. Backward compat: `CURSORPIPE_EXPOSE_THINKING=true` maps to `high`. |
 | `CURSORPIPE_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warning`, `error`, `critical`. At `debug`, logs sanitized request headers. |
 | `CURSORPIPE_LOG_REQUEST_HEADERS` | *(unset)* | `true` = log headers at info; `false` = never; unset = follow log level |

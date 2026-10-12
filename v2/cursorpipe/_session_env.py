@@ -17,8 +17,6 @@ import os
 import re
 from pathlib import Path
 
-from cursorpipe._config import settings
-
 _SESSION_DIR = ".cursorpipe/sessions"
 _SAFE_ID = re.compile(r"[^a-zA-Z0-9._-]+")
 
@@ -36,6 +34,8 @@ def resolve_user_id_value(
 
 def session_env_vars(user_id_value: str) -> dict[str, str]:
     """Env vars to inject for this session/user context."""
+    from cursorpipe._config import settings
+
     name = settings.session_user_id_env_var.strip()
     if not name:
         return {}

@@ -25,6 +25,7 @@ async def health(request: Request) -> JSONResponse:
             "session_user_id_env": settings.session_user_id_env,
             "session_user_id_env_var": settings.session_user_id_env_var,
             "log_request_headers": settings.effective_log_request_headers,
+            "user_workspace_mode": settings.user_workspace_mode,
         },
         status_code=http_status,
     )
