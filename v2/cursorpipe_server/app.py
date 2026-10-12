@@ -28,6 +28,7 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from cursorpipe._config import settings
+from cursorpipe._logging_setup import header_logging_status_message
 from cursorpipe._session_store import SessionStore
 from cursorpipe_server.errors import (
     cursor_error_handler,
@@ -71,6 +72,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         store.start_cleanup()
         app.state.session_store = store
 
+        logger.info(header_logging_status_message())
         logger.info(
             "cursorpipe-server v2 (SDK-based) ready on %s:%s\n\n"
             "  Endpoints:\n"

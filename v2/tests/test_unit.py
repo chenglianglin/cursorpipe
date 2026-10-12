@@ -124,6 +124,25 @@ class TestRequestHeaderLogging:
 
 
 @pytest.mark.unit
+class TestUserWorkspace:
+    def test_subdir_mode_uses_sanitized_user_cwd(self, monkeypatch, tmp_path) -> None:
+        from cursorpipe import _config as cfg
+        from cursorpipe._config import Settings, local_agent_options_for_session
+
+        monkeypatch.setenv("CURSORPIPE_WORKSPACE", str(tmp_path))
+        monkeypatch.setenv("CURSORPIPE_USER_WORKSPACE_MODE", "subdir")
+        monkeypatch.setenv("CURSORPIPE_SESSION_USER_ID_ENV", "false")
+        monkeypatch.setattr(cfg, "settings", Settings(_env_file=None))
+
+        wire = local_agent_options_for_session(
+            "sess-1", user_id_value="user@example.com"
+        )
+        assert isinstance(wire, dict)
+        assert wire["cwd"] == [str(tmp_path / ".cursorpipe/users/user_example.com")]
+        assert wire["dirs"] == [str(tmp_path)]
+
+
+@pytest.mark.unit
 class TestSessionUserEnv:
     def test_resolve_user_id_prefers_x_user_id_header(self) -> None:
         from cursorpipe._session_env import resolve_user_id_value
@@ -138,18 +157,18 @@ class TestSessionUserEnv:
         from cursorpipe._config import Settings, local_agent_options_for_session
 
         monkeypatch.setenv("CURSORPIPE_WORKSPACE", str(tmp_path))
+        monkeypatch.setenv("CURSORPIPE_USER_WORKSPACE_MODE", "off")
         monkeypatch.setenv("CURSORPIPE_SESSION_USER_ID_ENV", "true")
         monkeypatch.setenv("CURSORPIPE_SESSION_USER_ID_ENV_VAR", "X_USER_ID")
-        Settings(_env_file=None)  # refresh module settings — patch object below
         from cursorpipe import _config as cfg
 
-        cfg.settings = Settings(_env_file=None)
+        monkeypatch.setattr(cfg, "settings", Settings(_env_file=None))
 
         wire = local_agent_options_for_session("chat-abc", user_id_value="u-99")
         assert isinstance(wire, dict)
         assert wire["envVars"]["X_USER_ID"] == "u-99"
         env_file = tmp_path / ".cursorpipe" / "sessions" / "chat-abc.env"
-        assert env_file.is_file()
+        assert env_file.is_file(), wire.get("envVars")
         assert "export X_USER_ID='u-99'" in env_file.read_text()
 
 

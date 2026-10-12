@@ -40,7 +40,6 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             request,
             request_id=request_id,
             enabled=settings.effective_log_request_headers,
-            explicit_override=settings.log_request_headers,
         )
 
         response: Response = await call_next(request)

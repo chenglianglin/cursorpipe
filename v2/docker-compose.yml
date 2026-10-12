@@ -25,6 +25,8 @@ services:
       # Agent
       - CURSORPIPE_MODEL=composer-2.5
       - CURSORPIPE_WORKSPACE=/opt/workspace
+      # Per-user sandboxes under workspace (uses X-User-Id from Open WebUI)
+      - CURSORPIPE_USER_WORKSPACE_MODE=subdir
 
       # Sessions
       - CURSORPIPE_SESSION_TTL_MINUTES=30

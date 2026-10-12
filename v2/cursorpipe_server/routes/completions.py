@@ -64,21 +64,19 @@ def _log_stateful_routing_debug(
 
     if not app_settings.effective_log_request_headers:
         return
-    level = (
-        logging.INFO
-        if app_settings.log_request_headers is True
-        else logging.DEBUG
-    )
-    if not logger.isEnabledFor(level):
+    if not logger.isEnabledFor(logging.INFO):
         return
-    logger.log(
-        level,
+    from cursorpipe._user_workspace import resolve_workspace_layout
+
+    layout = resolve_workspace_layout(session_id, user_id_value)
+    logger.info(
         "[stateful] session_id=%r  x_user_id_header=%r  resolved_user_id=%r  "
-        "env_var=%s",
+        "env_var=%s  agent_cwd=%s",
         session_id,
         x_user_id_raw,
         user_id_value,
         app_settings.session_user_id_env_var,
+        layout.cwd,
     )
 
 
