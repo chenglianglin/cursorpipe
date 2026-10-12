@@ -40,6 +40,15 @@ class Settings(BaseSettings):
     # ── Stateful sessions ──────────────────────────────────────────────────────
     session_ttl_minutes: int = Field(default=30)
 
+    # When true, stateful requests (X-Cursor-Session-ID) inject a shell env var
+    # for the SDK local agent — default name X_USER_ID — so curl/scripts can pass
+    # open-terminal OpenAPI header x-user-id. Value: X-User-Id header if set,
+    # else the session id string.
+    session_user_id_env: bool = Field(default=True)
+
+    # Shell/env name forwarded to the agent (curl: -H "x-user-id: $X_USER_ID").
+    session_user_id_env_var: str = Field(default="X_USER_ID")
+
     # ── Thinking / reasoning ───────────────────────────────────────────────────
     # Controls whether thinking is requested from the SDK AND surfaced in
     # responses (reasoning_content for streaming, cursor_metadata.thinking for
@@ -101,3 +110,33 @@ def local_agent_options():
         cwd=settings.workspace,
         setting_sources=["project"],
     )
+
+
+def local_agent_options_wire() -> dict:
+    """Local agent options as bridge wire JSON (for merging envVars)."""
+    return local_agent_options().to_json()
+
+
+def local_agent_options_for_session(
+    session_id: str,
+    *,
+    user_id_value: str | None = None,
+) -> dict | object:
+    """Local options with per-session envVars when session_user_id_env is enabled."""
+    from cursor_sdk import LocalAgentOptions
+
+    base = local_agent_options()
+    if not settings.session_user_id_env:
+        return base
+
+    from cursorpipe._session_env import (
+        merge_local_options_with_env,
+        resolve_user_id_value,
+        session_env_vars,
+        write_session_env_file,
+    )
+
+    value = user_id_value if user_id_value is not None else resolve_user_id_value(session_id)
+    env_vars = session_env_vars(value)
+    env_file = write_session_env_file(settings.workspace, session_id, env_vars)
+    return merge_local_options_with_env(base.to_json(), env_vars, env_file)

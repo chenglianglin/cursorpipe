@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from cursorpipe._config import settings
 from cursorpipe_server.schemas import MESSAGE_ROLE_ALIASES
 
 router = APIRouter()
@@ -21,6 +22,8 @@ async def health(request: Request) -> JSONResponse:
             "status": status_str,
             "bridge": bridge_str,
             "message_role_aliases": list(MESSAGE_ROLE_ALIASES),
+            "session_user_id_env": settings.session_user_id_env,
+            "session_user_id_env_var": settings.session_user_id_env_var,
         },
         status_code=http_status,
     )

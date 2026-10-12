@@ -156,6 +156,8 @@ All settings are read from environment variables (or `.env` file).
 | `CURSORPIPE_MODEL` | `composer-2.5` | Default model |
 | `CURSORPIPE_WORKSPACE` | `.` | Working directory for the agent |
 | `CURSORPIPE_SESSION_TTL_MINUTES` | `30` | Idle session expiry |
+| `CURSORPIPE_SESSION_USER_ID_ENV` | `true` | Inject shell env for stateful requests (see below) |
+| `CURSORPIPE_SESSION_USER_ID_ENV_VAR` | `X_USER_ID` | Env var name forwarded to the local agent |
 | `CURSORPIPE_THINKING_LEVEL` | `off` | Request and surface thinking: `off`, `low`, or `high`. Backward compat: `CURSORPIPE_EXPOSE_THINKING=true` maps to `high`. |
 | `CURSORPIPE_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warning`, `error`, `critical` |
 
@@ -248,6 +250,13 @@ curl.exe http://localhost:8080/v1/chat/completions `
 ### Stateful sessions (multi-turn)
 
 Send `X-Cursor-Session-ID` to opt into stateful mode. The same agent is reused across turns.
+
+**Open WebUI / open-terminal:** When `CURSORPIPE_SESSION_USER_ID_ENV=true` (default), the
+first request for a session forwards `X_USER_ID` to the SDK local agent (`envVars` on the
+wire). Value = `X-User-Id` request header if set, otherwise the session id. Shell example:
+`curl -H "x-user-id: $X_USER_ID" https://open-terminal/...`. Fallback file:
+`.cursorpipe/sessions/<session-id>.env` (also sets `CURSORPIPE_SESSION_ENV_FILE`).
+Disable with `CURSORPIPE_SESSION_USER_ID_ENV=false`.
 
 ```bash
 # bash / macOS / Linux / WSL

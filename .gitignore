@@ -34,6 +34,9 @@ desktop.ini
 .env.*
 !.env.example
 
+# cursorpipe runtime session env files (generated under workspace)
+v2/.cursorpipe/
+
 # Testing / coverage
 .pytest_cache/
 .coverage

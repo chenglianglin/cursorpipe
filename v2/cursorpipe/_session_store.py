@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 from cursor_sdk import ModelParameterValue, ModelSelection
 
-from cursorpipe._config import local_agent_options, settings
+from cursorpipe._config import local_agent_options_for_session, settings
 
 if TYPE_CHECKING:
     from cursor_sdk import AsyncAgent, AsyncClient
@@ -81,6 +81,8 @@ class SessionStore:
         model: str,
         cursor_client: "AsyncClient",
         cursor_params: dict[str, str] | None = None,
+        *,
+        user_id_value: str | None = None,
     ) -> SessionEntry:
         """Return an existing session or create a new Agent for *session_id*."""
         async with self._lock:
@@ -100,7 +102,10 @@ class SessionStore:
             agent = await cursor_client.agents.create(
                 model=model_sel,
                 api_key=settings.cursor_api_key or None,
-                local=local_agent_options(),
+                local=local_agent_options_for_session(
+                    session_id,
+                    user_id_value=user_id_value,
+                ),
             )
             entry = SessionEntry(session_id=session_id, agent=agent, model=model)
             self._sessions[session_id] = entry

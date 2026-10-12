@@ -50,6 +50,7 @@ from cursorpipe_server.usage import token_usage_to_openai
 router = APIRouter()
 
 SESSION_HEADER = "X-Cursor-Session-ID"
+USER_ID_HEADER = "X-User-Id"
 
 
 def _last_user_message(messages: list) -> str:
@@ -106,10 +107,17 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
     model = body.model or settings.model
 
     if is_stateful:
+        from cursorpipe._session_env import resolve_user_id_value
+
+        user_id_value = resolve_user_id_value(
+            incoming_session_id,
+            request.headers.get(USER_ID_HEADER),
+        )
         return await _handle_stateful(
             body=body,
             model=model,
             incoming_session_id=incoming_session_id,
+            user_id_value=user_id_value,
             cursor_client=cursor_client,
             session_store=session_store,
         )
@@ -203,15 +211,31 @@ async def _handle_stateful(
     body: ChatCompletionRequest,
     model: str,
     incoming_session_id: str,
+    user_id_value: str,
     cursor_client,
     session_store,
 ):
     last_msg = _last_user_message(body.messages)
     cursor_params = body.cursor_params or None
+
+    from cursorpipe._config import settings as app_settings
+    from cursorpipe._session_env import session_env_vars, write_session_env_file
+
+    if app_settings.session_user_id_env:
+        write_session_env_file(
+            app_settings.workspace,
+            incoming_session_id,
+            session_env_vars(user_id_value),
+        )
+
     entry = await session_store.get(incoming_session_id)
     if entry is None:
         entry = await session_store.get_or_create(
-            incoming_session_id, model, cursor_client, cursor_params
+            incoming_session_id,
+            model,
+            cursor_client,
+            cursor_params,
+            user_id_value=user_id_value,
         )
 
     response_headers = {SESSION_HEADER: entry.session_id}

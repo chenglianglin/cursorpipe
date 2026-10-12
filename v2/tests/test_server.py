@@ -263,6 +263,23 @@ class TestChatCompletionsStateful:
         assert response.status_code == 200
         assert response.headers.get("x-cursor-session-id") == "stream-session"
 
+    async def test_stateful_create_passes_user_env_to_sdk(
+        self, app_client, mock_cursor_client
+    ) -> None:
+        response = await app_client.post(
+            "/v1/chat/completions",
+            headers={
+                "X-Cursor-Session-ID": "env-session",
+                "X-User-Id": "openwebui-user-7",
+            },
+            json=self._payload,
+        )
+        assert response.status_code == 200
+        create_kwargs = mock_cursor_client.agents.create.call_args.kwargs
+        local = create_kwargs["local"]
+        assert isinstance(local, dict)
+        assert local["envVars"]["X_USER_ID"] == "openwebui-user-7"
+
 
 # =========================================================================
 # Request ID header

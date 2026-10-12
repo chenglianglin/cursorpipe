@@ -95,6 +95,36 @@ class TestConfig:
         assert list(opts.setting_sources or ()) == ["project"]
 
 
+@pytest.mark.unit
+class TestSessionUserEnv:
+    def test_resolve_user_id_prefers_x_user_id_header(self) -> None:
+        from cursorpipe._session_env import resolve_user_id_value
+
+        assert resolve_user_id_value("sess-1", "user-42") == "user-42"
+        assert resolve_user_id_value("sess-1", "") == "sess-1"
+        assert resolve_user_id_value("sess-1", None) == "sess-1"
+
+    def test_local_agent_options_for_session_includes_env_vars(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path,
+    ) -> None:
+        from cursorpipe._config import Settings, local_agent_options_for_session
+
+        monkeypatch.setenv("CURSORPIPE_WORKSPACE", str(tmp_path))
+        monkeypatch.setenv("CURSORPIPE_SESSION_USER_ID_ENV", "true")
+        monkeypatch.setenv("CURSORPIPE_SESSION_USER_ID_ENV_VAR", "X_USER_ID")
+        Settings(_env_file=None)  # refresh module settings — patch object below
+        from cursorpipe import _config as cfg
+
+        cfg.settings = Settings(_env_file=None)
+
+        wire = local_agent_options_for_session("chat-abc", user_id_value="u-99")
+        assert isinstance(wire, dict)
+        assert wire["envVars"]["X_USER_ID"] == "u-99"
+        env_file = tmp_path / ".cursorpipe" / "sessions" / "chat-abc.env"
+        assert env_file.is_file()
+        assert "export X_USER_ID='u-99'" in env_file.read_text()
+
+
 # =========================================================================
 # Thinking / thinking_level config
 # =========================================================================
