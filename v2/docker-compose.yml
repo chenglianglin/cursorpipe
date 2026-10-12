@@ -34,6 +34,7 @@ services:
 
       # Logging (debug | info | warning | error | critical)
       - CURSORPIPE_LOG_LEVEL=error
+      - CURSORPIPE_LOG_REQUEST_HEADERS=false
 
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
