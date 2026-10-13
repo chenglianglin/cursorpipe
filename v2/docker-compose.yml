@@ -4,7 +4,7 @@ services:
     env_file:
       - .env
     volumes:
-      - /opt/workspace:/opt/workspace
+      - /opt/workspace:/home
       - /home/simon/.cursor:/root/.cursor
     ports:
       - "8080:8080"
@@ -24,7 +24,7 @@ services:
 
       # Agent
       - CURSORPIPE_MODEL=composer-2.5
-      - CURSORPIPE_WORKSPACE=/opt/workspace
+      - CURSORPIPE_WORKSPACE=/home
       # Per-user sandboxes under workspace (uses X-User-Id from Open WebUI)
       - CURSORPIPE_USER_WORKSPACE_MODE=subdir
 
@@ -45,3 +45,10 @@ services:
       retries: 3
       start_period: 15s
     restart: unless-stopped
+    networks:
+      - open-webui-network
+
+networks:
+  open-webui-network:
+    external: true
+
