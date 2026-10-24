@@ -47,7 +47,8 @@ def mock_message(mock_text_block):
 def mock_run(mock_message):
     """A fake SDK Run object.
 
-    run.messages() is an async generator that yields one assistant message.
+    ``run.messages()`` and ``run.events()`` both expose one terminal assistant
+    message. The latter mirrors the path used by the streaming HTTP endpoint.
     Scalar attributes (result, status, duration_ms, id, agent_id, model) are
     set to representative values so CompletionResult can be populated.
     """
@@ -58,7 +59,14 @@ def mock_run(mock_message):
     async def _messages():
         yield captured_message
 
+    async def _events():
+        event = MagicMock()
+        event.interaction_update = None
+        event.sdk_message = captured_message
+        yield event
+
     run.messages = _messages
+    run.events = _events
     run.result = "PONG"
     run.status = "finished"
     run.duration_ms = 120

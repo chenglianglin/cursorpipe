@@ -168,6 +168,54 @@ async def _collect_messages(run) -> tuple[str, str, int]:
     return text, thinking, thinking_ms
 
 
+async def _stream_run_chunks(
+    run,
+    *,
+    include_thinking: bool,
+) -> AsyncIterator[StreamChunk]:
+    """Yield SDK interaction deltas, with terminal messages as a fallback.
+
+    ``run.messages()`` deliberately exposes only completed SDK messages. Cursor
+    emits text and thinking incrementally as ``interaction_update`` events, so
+    consuming that convenience iterator makes an HTTP SSE endpoint appear to
+    stream while withholding all content until the run finishes.
+    """
+    received_text_delta = False
+
+    async for event in run.events():
+        update = getattr(event, "interaction_update", None)
+        update_type = getattr(update, "type", None)
+
+        if update_type == "text-delta":
+            text = getattr(update, "text", "") or ""
+            if text:
+                received_text_delta = True
+                yield StreamChunk(type="text", text=text)
+            continue
+
+        if update_type == "thinking-delta" and include_thinking:
+            text = getattr(update, "text", "") or ""
+            if text:
+                yield StreamChunk(
+                    type="thinking",
+                    text=text,
+                    thinking_duration_ms=getattr(update, "thinking_duration_ms", 0) or 0,
+                )
+            continue
+
+        # Keep compatibility with runtimes that do not expose interaction
+        # deltas. Their terminal assistant message remains streamable, just not
+        # incrementally.
+        message = getattr(event, "sdk_message", None)
+        if getattr(message, "type", None) != "assistant" or received_text_delta:
+            continue
+        content = getattr(getattr(message, "message", None), "content", None)
+        if content:
+            for block in content:
+                if getattr(block, "type", None) == "text" and block.text:
+                    yield StreamChunk(type="text", text=block.text)
+
+
 # ── Stateless ────────────────────────────────────────────────────────────────
 
 
@@ -222,21 +270,8 @@ async def stream_complete(
     agent = await cursor_client.agents.create(_agent_options(effective_model, cursor_params))
     try:
         run = await agent.send(prompt)
-        async for message in run.messages():
-            try:
-                if message.type == "thinking" and has_thinking:
-                    text = getattr(message, "text", "") or ""
-                    ms = getattr(message, "thinking_duration_ms", 0) or 0
-                    if text:
-                        yield StreamChunk(type="thinking", text=text, thinking_duration_ms=ms)
-                elif message.type == "assistant":
-                    content = getattr(getattr(message, "message", None), "content", None)
-                    if content:
-                        for block in content:
-                            if getattr(block, "type", None) == "text" and block.text:
-                                yield StreamChunk(type="text", text=block.text)
-            except Exception:
-                pass
+        async for chunk in _stream_run_chunks(run, include_thinking=has_thinking):
+            yield chunk
 
         usage = await _resolve_run_usage(run)
         if usage is not None:
@@ -282,21 +317,11 @@ async def stream_complete_stateful(
 ) -> AsyncIterator[StreamChunk]:
     """Stream one turn to a persistent Agent. Yields StreamChunk objects."""
     run = await session_entry.agent.send(last_user_message)
-    async for message in run.messages():
-        try:
-            if message.type == "thinking" and settings.thinking_param:
-                text = getattr(message, "text", "") or ""
-                ms = getattr(message, "thinking_duration_ms", 0) or 0
-                if text:
-                    yield StreamChunk(type="thinking", text=text, thinking_duration_ms=ms)
-            elif message.type == "assistant":
-                content = getattr(getattr(message, "message", None), "content", None)
-                if content:
-                    for block in content:
-                        if getattr(block, "type", None) == "text" and block.text:
-                            yield StreamChunk(type="text", text=block.text)
-        except Exception:
-            pass
+    async for chunk in _stream_run_chunks(
+        run,
+        include_thinking=bool(settings.thinking_param),
+    ):
+        yield chunk
 
     usage = await _resolve_run_usage(run)
     if usage is not None:
