@@ -53,6 +53,7 @@ logger = logging.getLogger("cursorpipe.completions")
 
 SESSION_HEADER = "X-Cursor-Session-ID"
 USER_ID_HEADER = "X-User-Id"
+EXPOSE_THINKING_HEADER = "X-Cursorpipe-Expose-Thinking"
 
 
 def _log_stateful_routing_debug(
@@ -101,6 +102,14 @@ def _include_stream_usage(body: ChatCompletionRequest) -> bool:
     return bool(body.stream_options and body.stream_options.include_usage)
 
 
+def _expose_thinking(request: Request) -> bool:
+    return request.headers.get(EXPOSE_THINKING_HEADER, "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
 def _openai_usage(result: CompletionResult) -> CompletionUsage | None:
     if result.usage is None:
         return None
@@ -132,6 +141,7 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
     incoming_session_id = request.headers.get(SESSION_HEADER, "").strip()
     is_stateful = bool(incoming_session_id)
     model = body.model or settings.model
+    expose_thinking = _expose_thinking(request)
 
     if is_stateful:
         from cursorpipe._session_env import resolve_user_id_value
@@ -151,14 +161,25 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
             user_id_value=user_id_value,
             cursor_client=cursor_client,
             session_store=session_store,
+            expose_thinking=expose_thinking,
         )
-    return await _handle_stateless(body=body, model=model, cursor_client=cursor_client)
+    return await _handle_stateless(
+        body=body,
+        model=model,
+        cursor_client=cursor_client,
+        expose_thinking=expose_thinking,
+    )
 
 
 # ── Stateless ────────────────────────────────────────────────────────────────
 
 
-async def _handle_stateless(body: ChatCompletionRequest, model: str, cursor_client):
+async def _handle_stateless(
+    body: ChatCompletionRequest,
+    model: str,
+    cursor_client,
+    expose_thinking: bool,
+):
     messages = _messages_as_dicts(body.messages)
     cursor_params = body.cursor_params or None
 
@@ -169,6 +190,7 @@ async def _handle_stateless(body: ChatCompletionRequest, model: str, cursor_clie
                 model,
                 cursor_client,
                 cursor_params,
+                expose_thinking=expose_thinking,
                 include_usage=_include_stream_usage(body),
             ),
             media_type="text/event-stream",
@@ -199,6 +221,7 @@ async def _stateless_stream_generator(
     cursor_client,
     cursor_params: dict[str, str] | None = None,
     *,
+    expose_thinking: bool,
     include_usage: bool = False,
 ):
     completion_id = f"chatcmpl-{uuid.uuid4().hex}"
@@ -211,7 +234,13 @@ async def _stateless_stream_generator(
         choices=[StreamChoice(delta=DeltaMessage(role="assistant"))],
     ).model_dump_json(exclude_none=True)}
 
-    async for chunk in stream_complete(messages, model, cursor_client, cursor_params):
+    async for chunk in stream_complete(
+        messages,
+        model,
+        cursor_client,
+        cursor_params,
+        expose_thinking=expose_thinking,
+    ):
         if chunk.type == "usage":
             pending_usage = chunk.usage
             continue
@@ -245,6 +274,7 @@ async def _handle_stateful(
     user_id_value: str,
     cursor_client,
     session_store,
+    expose_thinking: bool,
 ):
     last_msg = _last_user_message(body.messages)
     cursor_params = body.cursor_params or None
@@ -277,6 +307,7 @@ async def _handle_stateful(
                 entry,
                 last_msg,
                 model,
+                expose_thinking=expose_thinking,
                 include_usage=_include_stream_usage(body),
             ),
             media_type="text/event-stream",
@@ -308,6 +339,7 @@ async def _stateful_stream_generator(
     last_user_message: str,
     model: str,
     *,
+    expose_thinking: bool,
     include_usage: bool = False,
 ):
     completion_id = f"chatcmpl-{uuid.uuid4().hex}"
@@ -319,7 +351,11 @@ async def _stateful_stream_generator(
         choices=[StreamChoice(delta=DeltaMessage(role="assistant"))],
     ).model_dump_json(exclude_none=True)}
 
-    async for chunk in stream_complete_stateful(entry, last_user_message):
+    async for chunk in stream_complete_stateful(
+        entry,
+        last_user_message,
+        expose_thinking=expose_thinking,
+    ):
         if chunk.type == "usage":
             pending_usage = chunk.usage
             continue

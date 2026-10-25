@@ -207,7 +207,18 @@ async def _stream_run_chunks(
         # deltas. Their terminal assistant message remains streamable, just not
         # incrementally.
         message = getattr(event, "sdk_message", None)
-        if getattr(message, "type", None) != "assistant" or received_text_delta:
+        message_type = getattr(message, "type", None)
+        if message_type == "thinking" and include_thinking:
+            text = getattr(message, "text", "") or ""
+            if text:
+                yield StreamChunk(
+                    type="thinking",
+                    text=text,
+                    thinking_duration_ms=getattr(message, "thinking_duration_ms", 0) or 0,
+                )
+            continue
+
+        if message_type != "assistant" or received_text_delta:
             continue
         content = getattr(getattr(message, "message", None), "content", None)
         if content:
@@ -261,6 +272,8 @@ async def stream_complete(
     model: str | None,
     cursor_client: "AsyncClient",
     cursor_params: dict[str, str] | None = None,
+    *,
+    expose_thinking: bool = False,
 ) -> AsyncIterator[StreamChunk]:
     """One-shot stateless streaming completion. Yields StreamChunk objects."""
     effective_model = model or settings.model
@@ -270,7 +283,10 @@ async def stream_complete(
     agent = await cursor_client.agents.create(_agent_options(effective_model, cursor_params))
     try:
         run = await agent.send(prompt)
-        async for chunk in _stream_run_chunks(run, include_thinking=has_thinking):
+        async for chunk in _stream_run_chunks(
+            run,
+            include_thinking=expose_thinking and has_thinking,
+        ):
             yield chunk
 
         usage = await _resolve_run_usage(run)
@@ -314,12 +330,14 @@ async def complete_stateful(
 async def stream_complete_stateful(
     session_entry: "SessionEntry",
     last_user_message: str,
+    *,
+    expose_thinking: bool = False,
 ) -> AsyncIterator[StreamChunk]:
     """Stream one turn to a persistent Agent. Yields StreamChunk objects."""
     run = await session_entry.agent.send(last_user_message)
     async for chunk in _stream_run_chunks(
         run,
-        include_thinking=bool(settings.thinking_param),
+        include_thinking=expose_thinking and bool(settings.thinking_param),
     ):
         yield chunk
 
