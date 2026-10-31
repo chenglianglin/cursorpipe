@@ -10,7 +10,8 @@ Accepted session headers, first match wins:
   X-Cursor-Session-ID, then OpenClaw's session_id, then x-session-affinity.
 
 The first turn of a session receives the flattened transcript. Later turns send
-only the last user message; the SDK Agent holds the rest of the history.
+the newest user question. A trailing OpenClaw runtime-context message is kept
+with that question; it is not sent alone. The SDK Agent holds the earlier history.
 
 Thinking / cursor_params
 ------------------------
@@ -75,13 +76,57 @@ def _incoming_session_id(request: Request) -> str:
 
 
 def _stateful_prompt(messages: list, *, initial: bool) -> str:
-    """Seed a new agent with the transcript; later turns send the new user text."""
+    """Seed a new agent with the transcript; later turns send the new question."""
     if not initial:
-        return _last_user_message(messages)
+        return _followup_prompt(messages)
     from cursorpipe._client import _flatten_messages
 
     prompt, _system = _flatten_messages(_messages_as_dicts(messages))
-    return prompt or _last_user_message(messages)
+    return prompt or _followup_prompt(messages)
+
+
+def _message_text(message) -> str:
+    content = message.content or ""
+    if isinstance(content, list):
+        return " ".join(
+            block.get("text", "") for block in content if block.get("type") == "text"
+        )
+    return content
+
+
+def _is_runtime_context(text: str) -> bool:
+    """OpenClaw appends this as a user message after the real question."""
+    return "OpenClaw runtime context:" in text
+
+
+def _followup_prompt(messages: list) -> str:
+    """Send the newest real user question, with any runtime context after it.
+
+    The runtime-context carrier is itself role=user and is often last. Sending
+    only that carrier drops the question for this turn, so the agent answers
+    the previous one.
+    """
+    user_texts = [
+        _message_text(message) for message in messages if message.role == "user"
+    ]
+    if not user_texts:
+        return ""
+    last_real = None
+    for index in range(len(user_texts) - 1, -1, -1):
+        if not _is_runtime_context(user_texts[index]):
+            last_real = index
+            break
+    if last_real is None:
+        return user_texts[-1]
+    context = [
+        text
+        for text in user_texts[last_real + 1 :]
+        if _is_runtime_context(text) and text.strip()
+    ]
+    question = user_texts[last_real]
+    if not context:
+        return question
+    return "\n\n".join([*context, question])
 
 
 def _log_stateful_routing_debug(
@@ -107,19 +152,6 @@ def _log_stateful_routing_debug(
         app_settings.session_user_id_env_var,
         layout.cwd,
     )
-
-
-def _last_user_message(messages: list) -> str:
-    """Extract the content of the last user-role message."""
-    for msg in reversed(messages):
-        if msg.role == "user":
-            content = msg.content or ""
-            if isinstance(content, list):
-                return " ".join(
-                    b.get("text", "") for b in content if b.get("type") == "text"
-                )
-            return content
-    return ""
 
 
 def _messages_as_dicts(messages: list) -> list[dict]:

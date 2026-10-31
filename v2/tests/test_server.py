@@ -285,6 +285,43 @@ class TestChatCompletionsStateful:
         assert "system prompt" not in prompts[0]
         assert prompts[1] == "second question"
 
+    async def test_followup_keeps_question_ahead_of_runtime_context(
+        self, app_client, mock_agent
+    ) -> None:
+        """The runtime-context carrier is last, but the new question must still be sent."""
+        headers = {"session_id": "openclaw-followup"}
+        await app_client.post(
+            "/v1/chat/completions",
+            headers=headers,
+            json={
+                "model": "composer-2.5",
+                "messages": [
+                    {"role": "user", "content": "第一個問題"},
+                ],
+            },
+        )
+        await app_client.post(
+            "/v1/chat/completions",
+            headers=headers,
+            json={
+                "model": "composer-2.5",
+                "messages": [
+                    {"role": "user", "content": "第一個問題"},
+                    {"role": "assistant", "content": "第一個回答"},
+                    {"role": "user", "content": "第二個問題"},
+                    {
+                        "role": "user",
+                        "content": "OpenClaw runtime context:\nprevious history only",
+                    },
+                ],
+            },
+        )
+        prompt = mock_agent.send.await_args_list[1].args[0]
+        assert "第二個問題" in prompt
+        assert prompt.endswith("第二個問題")
+        assert "OpenClaw runtime context:" in prompt
+        assert "第一個問題" not in prompt
+
     async def test_session_affinity_header_is_stateful(self, app_client, mock_agent) -> None:
         response = await app_client.post(
             "/v1/chat/completions",
