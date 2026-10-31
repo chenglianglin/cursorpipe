@@ -2,12 +2,15 @@
 
 Session routing
 ---------------
-No X-Cursor-Session-ID header  → stateless (one-shot per request)
+No session header              → stateless (one-shot per request)
 Header present, known ID       → stateful (existing agent.send())
 Header present, unknown ID     → stateful (create new agent, return ID in response header)
 
-For stateful requests only the *last* user message is forwarded to agent.send()
-because the SDK Agent already holds the full conversation history internally.
+Accepted session headers, first match wins:
+  X-Cursor-Session-ID, then OpenClaw's session_id, then x-session-affinity.
+
+The first turn of a session receives the flattened transcript. Later turns send
+only the last user message; the SDK Agent holds the rest of the history.
 
 Thinking / cursor_params
 ------------------------
@@ -52,8 +55,33 @@ router = APIRouter()
 logger = logging.getLogger("cursorpipe.completions")
 
 SESSION_HEADER = "X-Cursor-Session-ID"
+# OpenClaw sends these when compat.sendSessionAffinityHeaders is true.
+# x-client-request-id is omitted: other clients use it as a per-request id.
+AFFINITY_SESSION_HEADERS = ("session_id", "x-session-affinity")
 USER_ID_HEADER = "X-User-Id"
 EXPOSE_THINKING_HEADER = "X-Cursorpipe-Expose-Thinking"
+
+
+def _incoming_session_id(request: Request) -> str:
+    """Resolve the session id from cursorpipe or OpenClaw affinity headers."""
+    explicit = request.headers.get(SESSION_HEADER, "").strip()
+    if explicit:
+        return explicit
+    for name in AFFINITY_SESSION_HEADERS:
+        value = request.headers.get(name, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _stateful_prompt(messages: list, *, initial: bool) -> str:
+    """Seed a new agent with the transcript; later turns send the new user text."""
+    if not initial:
+        return _last_user_message(messages)
+    from cursorpipe._client import _flatten_messages
+
+    prompt, _system = _flatten_messages(_messages_as_dicts(messages))
+    return prompt or _last_user_message(messages)
 
 
 def _log_stateful_routing_debug(
@@ -138,7 +166,7 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
     cursor_client = request.app.state.cursor_client
     session_store = request.app.state.session_store
 
-    incoming_session_id = request.headers.get(SESSION_HEADER, "").strip()
+    incoming_session_id = _incoming_session_id(request)
     is_stateful = bool(incoming_session_id)
     model = body.model or settings.model
     expose_thinking = _expose_thinking(request)
@@ -276,7 +304,6 @@ async def _handle_stateful(
     session_store,
     expose_thinking: bool,
 ):
-    last_msg = _last_user_message(body.messages)
     cursor_params = body.cursor_params or None
 
     from cursorpipe._config import settings as app_settings
@@ -300,12 +327,16 @@ async def _handle_stateful(
         )
 
     response_headers = {SESSION_HEADER: entry.session_id}
+    prompt = _stateful_prompt(
+        body.messages,
+        initial=await session_store.consume_initial_prompt(entry.session_id),
+    )
 
     if body.stream:
         return EventSourceResponse(
             _stateful_stream_generator(
                 entry,
-                last_msg,
+                prompt,
                 model,
                 expose_thinking=expose_thinking,
                 include_usage=_include_stream_usage(body),
@@ -314,7 +345,7 @@ async def _handle_stateful(
             headers=response_headers,
         )
 
-    result = await complete_stateful(entry, last_msg)
+    result = await complete_stateful(entry, prompt)
     return JSONResponse(
         content=ChatCompletionResponse(
             model=result.actual_model or model,

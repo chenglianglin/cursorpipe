@@ -59,6 +59,24 @@ class StreamChunk:
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
+def _thinking_level_selection(model: str, level: str) -> ModelSelection:
+    """Map CURSORPIPE_THINKING_LEVEL onto a parameter the model accepts.
+
+    Grok 4.7 has no ``thinking`` parameter. Sending one makes Cursor reject
+    the model as invalid and the run finishes with no text. Its effort
+    control is ``reasoning_effort``.
+    """
+    if model == "grok-4.7":
+        params = [
+            ModelParameterValue(id="context", value="256k"),
+            ModelParameterValue(id="reasoning_effort", value=level),
+            ModelParameterValue(id="fast", value="false"),
+        ]
+    else:
+        params = [ModelParameterValue(id="thinking", value=level)]
+    return ModelSelection(id=model, params=params)
+
+
 def _agent_options(model: str, cursor_params: dict[str, str] | None = None) -> AgentOptions:
     """Build AgentOptions with model parameters.
 
@@ -75,10 +93,7 @@ def _agent_options(model: str, cursor_params: dict[str, str] | None = None) -> A
     else:
         thinking = settings.thinking_param
         if thinking:
-            model_sel = ModelSelection(
-                id=model,
-                params=[ModelParameterValue(id="thinking", value=thinking)],
-            )
+            model_sel = _thinking_level_selection(model, thinking)
         else:
             model_sel = model
 

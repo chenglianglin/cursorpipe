@@ -245,6 +245,77 @@ class TestChatCompletionsStateful:
         "messages": [{"role": "user", "content": "Hello"}],
     }
 
+    async def test_openclaw_session_id_reuses_one_agent(
+        self, app_client, mock_cursor_client, mock_agent
+    ) -> None:
+        """session_id from OpenClaw affinity keeps one agent and only the new turn."""
+        headers = {"session_id": "agent:main:dashboard:chat"}
+        first = await app_client.post(
+            "/v1/chat/completions",
+            headers=headers,
+            json={
+                "model": "composer-2.5",
+                "messages": [
+                    {"role": "system", "content": "system prompt"},
+                    {"role": "user", "content": "hello"},
+                    {"role": "assistant", "content": "hi"},
+                    {"role": "user", "content": "first question"},
+                ],
+            },
+        )
+        second = await app_client.post(
+            "/v1/chat/completions",
+            headers=headers,
+            json={
+                "model": "composer-2.5",
+                "messages": [
+                    {"role": "system", "content": "system prompt"},
+                    {"role": "user", "content": "hello"},
+                    {"role": "assistant", "content": "hi"},
+                    {"role": "user", "content": "second question"},
+                ],
+            },
+        )
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert first.headers.get("x-cursor-session-id") == "agent:main:dashboard:chat"
+        assert mock_cursor_client.agents.create.call_count == 1
+        prompts = [call.args[0] for call in mock_agent.send.await_args_list]
+        assert "user: first question" in prompts[0]
+        assert "system prompt" not in prompts[0]
+        assert prompts[1] == "second question"
+
+    async def test_session_affinity_header_is_stateful(self, app_client, mock_agent) -> None:
+        response = await app_client.post(
+            "/v1/chat/completions",
+            headers={"x-session-affinity": "affinity-session"},
+            json=self._payload,
+        )
+        assert response.status_code == 200
+        assert response.headers.get("x-cursor-session-id") == "affinity-session"
+        assert mock_agent.close.await_count == 0
+
+    async def test_client_request_id_stays_stateless(self, app_client, mock_agent) -> None:
+        response = await app_client.post(
+            "/v1/chat/completions",
+            headers={"x-client-request-id": "request-only"},
+            json=self._payload,
+        )
+        assert response.status_code == 200
+        assert response.headers.get("x-cursor-session-id") is None
+        assert mock_agent.close.await_count == 1
+
+    async def test_explicit_session_header_wins(self, app_client) -> None:
+        response = await app_client.post(
+            "/v1/chat/completions",
+            headers={
+                "X-Cursor-Session-ID": "explicit-session",
+                "session_id": "openclaw-session",
+            },
+            json=self._payload,
+        )
+        assert response.headers.get("x-cursor-session-id") == "explicit-session"
+
     async def test_session_header_echoed(self, app_client) -> None:
         response = await app_client.post(
             "/v1/chat/completions",

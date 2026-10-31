@@ -295,6 +295,28 @@ class TestAgentOptions:
         params = {p.id: p.value for p in opts.model.params}
         assert params.get("thinking") == "low"
 
+    def test_grok_4_7_thinking_level_uses_reasoning_effort(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Grok 4.7 rejects thinking=low; map the global level to reasoning_effort."""
+        monkeypatch.setenv("CURSORPIPE_THINKING_LEVEL", "low")
+        monkeypatch.delenv("CURSORPIPE_EXPOSE_THINKING", raising=False)
+
+        import importlib
+        import cursorpipe._config as cfg_mod
+        importlib.reload(cfg_mod)
+        import cursorpipe._client as client_mod
+        importlib.reload(client_mod)
+
+        opts = client_mod._agent_options("grok-4.7")
+        from cursor_sdk import ModelSelection
+        assert isinstance(opts.model, ModelSelection)
+        params = {p.id: p.value for p in opts.model.params}
+        assert params.get("reasoning_effort") == "low"
+        assert params.get("context") == "256k"
+        assert params.get("fast") == "false"
+        assert "thinking" not in params
+
     def test_cursor_params_creates_model_selection(self) -> None:
         """Explicit cursor_params build ModelSelection regardless of THINKING_LEVEL."""
         import importlib

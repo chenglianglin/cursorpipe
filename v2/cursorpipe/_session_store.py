@@ -24,6 +24,24 @@ if TYPE_CHECKING:
     from cursor_sdk import AsyncAgent, AsyncClient
 
 
+def _session_model_selection(
+    model: str,
+    cursor_params: dict[str, str] | None,
+) -> str | ModelSelection:
+    """Match stateless model parameters, including the grok-4.7 effort mapping."""
+    if cursor_params:
+        return ModelSelection(
+            id=model,
+            params=[ModelParameterValue(id=k, value=v) for k, v in cursor_params.items()],
+        )
+    level = settings.thinking_param
+    if level:
+        from cursorpipe._client import _thinking_level_selection
+
+        return _thinking_level_selection(model, level)
+    return model
+
+
 @dataclass
 class SessionEntry:
     session_id: str
@@ -31,6 +49,7 @@ class SessionEntry:
     model: str
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     last_used_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    initial_prompt_sent: bool = False
 
     def touch(self) -> None:
         self.last_used_at = datetime.now(timezone.utc)
@@ -91,13 +110,7 @@ class SessionStore:
                 entry.touch()
                 return entry
 
-            if cursor_params:
-                model_sel = ModelSelection(
-                    id=model,
-                    params=[ModelParameterValue(id=k, value=v) for k, v in cursor_params.items()],
-                )
-            else:
-                model_sel = model  # type: ignore[assignment]
+            model_sel = _session_model_selection(model, cursor_params)
 
             agent = await cursor_client.agents.create(
                 model=model_sel,
@@ -120,6 +133,15 @@ class SessionStore:
         """Create a fresh session with an auto-generated UUID."""
         session_id = str(uuid.uuid4())
         return await self.get_or_create(session_id, model, cursor_client, cursor_params)
+
+    async def consume_initial_prompt(self, session_id: str) -> bool:
+        """Return True only for the first turn that should receive the transcript."""
+        async with self._lock:
+            entry = self._sessions.get(session_id)
+            if entry is None or entry.initial_prompt_sent:
+                return False
+            entry.initial_prompt_sent = True
+            return True
 
     async def get(self, session_id: str) -> SessionEntry | None:
         async with self._lock:

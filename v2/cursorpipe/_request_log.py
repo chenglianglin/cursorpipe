@@ -22,7 +22,12 @@ _REDACT_EXACT = frozenset(
 _REDACT_PREFIXES = ("x-cursor-api-key",)
 
 # Logged at debug when header logging is enabled (easy to grep).
-_SESSION_HEADERS = ("x-cursor-session-id", "x-user-id")
+_SESSION_HEADERS = (
+    "x-cursor-session-id",
+    "session_id",
+    "x-session-affinity",
+    "x-user-id",
+)
 
 
 def _redact_header_value(name: str, value: str) -> str:
@@ -75,7 +80,7 @@ def log_incoming_headers(
     else:
         logger.info(
             "[HEADERS] request_id=%s  session=<none>  "
-            "(no X-Cursor-Session-ID / X-User-Id)",
+            "(no session id / X-User-Id)",
             request_id,
         )
 
