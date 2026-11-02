@@ -176,6 +176,89 @@ class TestUserWorkspace:
         assert isinstance(plain, dict)
         assert plain["cwd"] == [str(tmp_path)]
 
+        openwebui = (
+            "agent:main:openresponses-user:openwebui:"
+            "fc53337d-4ff7-430a-bdc4-55ceb56ce2c0:chat:"
+            "14c1908b-0e02-452b-b5f6-296fc1c2eae9:0"
+        )
+        assert openclaw_agent_id_from_session(openwebui) == "main"
+        routed = local_agent_options_for_session(openwebui[:64])
+        assert isinstance(routed, dict)
+        assert routed["cwd"] == [str(tmp_path / "workspace")]
+
+        other_http = local_agent_options_for_session(
+            "agent:my-research:openai-user:openwebui:user:chat:room:1"
+        )
+        assert isinstance(other_http, dict)
+        assert other_http["cwd"] == [str(tmp_path / "workspaces" / "my-research")]
+
+        assert openclaw_agent_id_from_session("agent:../x:rest") is None
+        assert openclaw_agent_id_from_session(
+            "6be3b645-0ca5-4428-baba-cd79ebb3608f:0"
+        ) is None
+
+    def test_transcript_uuid_looks_up_agent_workspace(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        import sqlite3
+
+        from cursorpipe import _config as cfg
+        from cursorpipe._config import Settings, local_agent_options_for_session
+        from cursorpipe._user_workspace import openclaw_agent_id_from_transcript
+
+        monkeypatch.setenv("CURSORPIPE_WORKSPACE", str(tmp_path))
+        monkeypatch.setenv("CURSORPIPE_USER_WORKSPACE_MODE", "off")
+        monkeypatch.setenv("CURSORPIPE_SESSION_USER_ID_ENV", "false")
+        monkeypatch.setattr(cfg, "settings", Settings(_env_file=None))
+
+        transcript = "a0a1cfbc-3068-4964-9357-3c84823b3293"
+        session_key = (
+            "agent:main:openresponses-user:openwebui:"
+            "fc53337d-4ff7-430a-bdc4-55ceb56ce2c0:chat:"
+            "48fc27ae-3a6a-4b2c-b8aa-0b487e3cb063"
+        )
+        db_path = tmp_path / "agents" / "main" / "agent" / "openclaw-agent.sqlite"
+        db_path.parent.mkdir(parents=True)
+        connection = sqlite3.connect(db_path)
+        connection.execute(
+            "CREATE TABLE session_nodes (session_key TEXT, current_session_id TEXT)"
+        )
+        connection.execute(
+            "INSERT INTO session_nodes (session_key, current_session_id) VALUES (?, ?)",
+            (session_key, transcript),
+        )
+        connection.commit()
+        connection.close()
+
+        assert openclaw_agent_id_from_transcript(tmp_path, f"{transcript}:0") == "main"
+        routed = local_agent_options_for_session(f"{transcript}:0")
+        assert isinstance(routed, dict)
+        assert routed["cwd"] == [str(tmp_path / "workspace")]
+
+        assert openclaw_agent_id_from_transcript(tmp_path, f"{transcript}:12") == "main"
+        assert openclaw_agent_id_from_transcript(
+            tmp_path, "00000000-0000-4000-8000-000000000000:0"
+        ) is None
+        assert openclaw_agent_id_from_transcript(tmp_path, "not-a-uuid:0") is None
+
+        older = "6be3b645-0ca5-4428-baba-cd79ebb3608f"
+        other_db = tmp_path / "agents" / "research" / "agent" / "openclaw-agent.sqlite"
+        other_db.parent.mkdir(parents=True)
+        connection = sqlite3.connect(other_db)
+        connection.execute(
+            "CREATE TABLE session_windows (session_id TEXT, session_key TEXT)"
+        )
+        connection.execute(
+            "INSERT INTO session_windows (session_id, session_key) VALUES (?, ?)",
+            (older, "agent:my-research:openai-user:openwebui:user:chat:room"),
+        )
+        connection.commit()
+        connection.close()
+        assert openclaw_agent_id_from_transcript(tmp_path, f"{older}:1") == "my-research"
+        older_routed = local_agent_options_for_session(f"{older}:1")
+        assert isinstance(older_routed, dict)
+        assert older_routed["cwd"] == [str(tmp_path / "workspaces" / "my-research")]
+
 
 @pytest.mark.unit
 class TestSessionUserEnv:
