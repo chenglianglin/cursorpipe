@@ -10,6 +10,12 @@ from pathlib import Path
 from cursorpipe._session_env import resolve_user_id_value
 
 _SAFE_SEGMENT = re.compile(r"[^a-zA-Z0-9._-]+")
+_AGENT_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+# openclaw-webchat-<agentId>-<hash>. The hash may be shorter than 32 when the
+# 64-character affinity header truncates the end. Agent ids may contain hyphens.
+_WEBCHAT_AGENT_SESSION = re.compile(
+    r"^openclaw-webchat-(?P<agent>.+)-(?P<hash>[0-9a-fA-F]+)$"
+)
 
 
 @dataclass(frozen=True)
@@ -26,6 +32,24 @@ def safe_user_segment(user_id: str) -> str:
     return cleaned or "anonymous"
 
 
+def openclaw_agent_id_from_session(session_id: str) -> str | None:
+    """Return the OpenClaw agent id embedded in a webchat affinity key."""
+    match = _WEBCHAT_AGENT_SESSION.fullmatch(session_id.strip())
+    if match is None:
+        return None
+    agent_id = match.group("agent").lower()
+    if _AGENT_ID.fullmatch(agent_id) is None:
+        return None
+    return agent_id
+
+
+def agent_workspace_dir(project_root: Path, agent_id: str) -> Path:
+    """Map an OpenClaw agent id to its Cursor project directory."""
+    if agent_id == "main":
+        return project_root / "workspace"
+    return project_root / "workspaces" / agent_id
+
+
 def resolve_workspace_layout(
     session_id: str,
     user_id_value: str | None = None,
@@ -34,6 +58,14 @@ def resolve_workspace_layout(
     from cursorpipe._config import settings
 
     project_root = Path(settings.workspace).expanduser().resolve()
+    agent_id = openclaw_agent_id_from_session(session_id)
+    if agent_id is not None:
+        return WorkspaceLayout(
+            cwd=agent_workspace_dir(project_root, agent_id),
+            dirs=(),
+            env_files_root=project_root,
+        )
+
     user_id = user_id_value if user_id_value is not None else resolve_user_id_value(
         session_id
     )

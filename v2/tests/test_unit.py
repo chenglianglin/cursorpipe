@@ -141,6 +141,41 @@ class TestUserWorkspace:
         assert wire["cwd"] == [str(tmp_path / ".cursorpipe/users/user_example.com")]
         assert wire["dirs"] == [str(tmp_path)]
 
+    def test_webchat_agent_key_selects_agent_workspace(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        from cursorpipe import _config as cfg
+        from cursorpipe._config import Settings, local_agent_options_for_session
+        from cursorpipe._user_workspace import openclaw_agent_id_from_session
+
+        monkeypatch.setenv("CURSORPIPE_WORKSPACE", str(tmp_path))
+        monkeypatch.setenv("CURSORPIPE_USER_WORKSPACE_MODE", "off")
+        monkeypatch.setenv("CURSORPIPE_SESSION_USER_ID_ENV", "false")
+        monkeypatch.setattr(cfg, "settings", Settings(_env_file=None))
+
+        digest = "44a4bd23fb43e866c2dd3fa45399424f"
+        assert openclaw_agent_id_from_session(f"openclaw-webchat-{digest}") is None
+        assert openclaw_agent_id_from_session(
+            f"openclaw-webchat-../x-{digest}"
+        ) is None
+
+        main = local_agent_options_for_session(
+            f"openclaw-webchat-main-{digest}"
+        )
+        assert isinstance(main, dict)
+        assert main["cwd"] == [str(tmp_path / "workspace")]
+        assert "dirs" not in main or not main["dirs"]
+
+        other = local_agent_options_for_session(
+            f"openclaw-webchat-my-research-{digest[:8]}"
+        )
+        assert isinstance(other, dict)
+        assert other["cwd"] == [str(tmp_path / "workspaces" / "my-research")]
+
+        plain = local_agent_options_for_session(f"openclaw-webchat-{digest}")
+        assert isinstance(plain, dict)
+        assert plain["cwd"] == [str(tmp_path)]
+
 
 @pytest.mark.unit
 class TestSessionUserEnv:
