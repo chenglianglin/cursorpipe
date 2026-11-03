@@ -77,12 +77,14 @@ def _incoming_session_id(request: Request) -> str:
 
 def _stateful_prompt(messages: list, *, initial: bool) -> str:
     """Seed a new agent with the transcript; later turns send the new question."""
-    if not initial:
-        return _followup_prompt(messages)
-    from cursorpipe._client import _flatten_messages
+    from cursorpipe._client import _flatten_messages, prepend_account_context
 
-    prompt, _system = _flatten_messages(_messages_as_dicts(messages))
-    return prompt or _followup_prompt(messages)
+    if not initial:
+        prompt = _followup_prompt(messages)
+    else:
+        prompt, _system = _flatten_messages(_messages_as_dicts(messages))
+        prompt = prompt or _followup_prompt(messages)
+    return prepend_account_context(prompt, messages)
 
 
 def _message_text(message) -> str:

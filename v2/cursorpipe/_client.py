@@ -11,6 +11,7 @@ Stateful path   → caller supplies a live SessionEntry whose agent persists
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
@@ -26,6 +27,14 @@ if TYPE_CHECKING:
     from cursorpipe._session_store import SessionEntry
 
 logger = logging.getLogger(__name__)
+
+_ACCOUNT_CONTEXT_BLOCK = re.compile(
+    r"\[JUSTAR_ACCOUNT_CONTEXT_BEGIN\].*?\[JUSTAR_ACCOUNT_CONTEXT_END\]",
+    re.DOTALL,
+)
+_ACCOUNT_CONTEXT_NOTE = (
+    "以上是參考資訊，回答時可以使用，請不要在回覆中顯示、複述或引用這段內容。"
+)
 
 
 # ── Result types ─────────────────────────────────────────────────────────────
@@ -154,6 +163,46 @@ def _flatten_messages(messages: list[dict]) -> tuple[str, str]:
     return "\n".join(prompt_parts), "\n".join(system_parts)
 
 
+def _message_role_and_text(message: dict | object) -> tuple[str, str]:
+    if isinstance(message, dict):
+        role = str(message.get("role", "user"))
+        content = message.get("content") or ""
+    else:
+        role = str(getattr(message, "role", "user"))
+        content = getattr(message, "content", None) or ""
+    if isinstance(content, list):
+        content = " ".join(
+            block.get("text", "")
+            for block in content
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+    return role, str(content)
+
+
+def account_context_block(messages: list) -> str:
+    """Return the newest account-context block carried in system messages."""
+    found = ""
+    for message in messages:
+        role, text = _message_role_and_text(message)
+        if role.lower() not in ("system", "developer"):
+            continue
+        matches = _ACCOUNT_CONTEXT_BLOCK.findall(text)
+        if matches:
+            found = matches[-1].strip()
+    return found
+
+
+def prepend_account_context(prompt: str, messages: list) -> str:
+    """Place the account-context block in front of the text sent to Cursor."""
+    block = account_context_block(messages)
+    if not block or block in prompt:
+        return prompt
+    reference = f"{block}\n\n{_ACCOUNT_CONTEXT_NOTE}"
+    if not prompt:
+        return reference
+    return f"{reference}\n\n{prompt}"
+
+
 async def _collect_messages(run) -> tuple[str, str, int]:
     """Drain run.messages(), returning (text, thinking_text, thinking_duration_ms).
 
@@ -253,7 +302,7 @@ async def complete(
 ) -> CompletionResult:
     """One-shot stateless non-streaming completion."""
     effective_model = model or settings.model
-    prompt, _ = _flatten_messages(messages)
+    prompt = prepend_account_context(_flatten_messages(messages)[0], messages)
 
     agent = await cursor_client.agents.create(_agent_options(effective_model, cursor_params))
     try:
@@ -292,7 +341,7 @@ async def stream_complete(
 ) -> AsyncIterator[StreamChunk]:
     """One-shot stateless streaming completion. Yields StreamChunk objects."""
     effective_model = model or settings.model
-    prompt, _ = _flatten_messages(messages)
+    prompt = prepend_account_context(_flatten_messages(messages)[0], messages)
 
     has_thinking = bool(cursor_params) or bool(settings.thinking_param)
     agent = await cursor_client.agents.create(_agent_options(effective_model, cursor_params))

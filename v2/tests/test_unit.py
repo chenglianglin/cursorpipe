@@ -609,6 +609,47 @@ class TestFlattenMessages:
         prompt, _ = self._flatten(messages)
         assert "assistant: Hi there" in prompt
 
+    def test_account_context_is_prepended_to_user_text(self) -> None:
+        from cursorpipe._client import prepend_account_context
+
+        block = (
+            "[JUSTAR_ACCOUNT_CONTEXT_BEGIN]\n"
+            "Tenant ID: T123\n"
+            "Agent ID: main\n"
+            "[JUSTAR_ACCOUNT_CONTEXT_END]"
+        )
+        messages = [
+            {"role": "system", "content": f"OpenClaw policy\n\n{block}\n\nmore policy"},
+            {"role": "user", "content": "請問 account_id"},
+        ]
+        prompt, _system = self._flatten(messages)
+        sent = prepend_account_context(prompt, messages)
+        assert sent.startswith(block)
+        assert "以上是參考資訊" in sent
+        assert sent.index(block) < sent.index("請問 account_id")
+        assert "OpenClaw policy" not in sent
+
+    def test_followup_prompt_includes_account_context(self) -> None:
+        from types import SimpleNamespace
+
+        from cursorpipe_server.routes.completions import _stateful_prompt
+
+        block = (
+            "[JUSTAR_ACCOUNT_CONTEXT_BEGIN]\n"
+            "Account ID: 1144\n"
+            "[JUSTAR_ACCOUNT_CONTEXT_END]"
+        )
+        messages = [
+            SimpleNamespace(role="system", content=block),
+            SimpleNamespace(role="user", content="上一題"),
+            SimpleNamespace(role="assistant", content="上一答"),
+            SimpleNamespace(role="user", content="你的 account_id 是多少"),
+        ]
+        sent = _stateful_prompt(messages, initial=False)
+        assert sent.startswith(block)
+        assert sent.endswith("你的 account_id 是多少")
+        assert "上一題" not in sent
+
 
 # =========================================================================
 # CompletionResult / StreamChunk dataclasses
