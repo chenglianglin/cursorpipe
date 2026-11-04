@@ -97,8 +97,19 @@ def _message_text(message) -> str:
 
 
 def _is_runtime_context(text: str) -> bool:
-    """OpenClaw appends this as a user message after the real question."""
-    return "OpenClaw runtime context:" in text
+    """OpenClaw appends runtime facts after the real user question.
+
+    Recognize legacy plain-text carriers and 2026.9+ delimited internal context.
+    """
+    if not text or not text.strip():
+        return False
+    if "OpenClaw runtime context:" in text:
+        return True
+    if "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>" in text:
+        return True
+    if text.strip().startswith("Conversation info: ⟦openclaw:ctx⟧"):
+        return True
+    return False
 
 
 def _followup_prompt(messages: list) -> str:

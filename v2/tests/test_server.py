@@ -322,6 +322,44 @@ class TestChatCompletionsStateful:
         assert "OpenClaw runtime context:" in prompt
         assert "第一個問題" not in prompt
 
+    async def test_followup_keeps_question_ahead_of_delimited_internal_context(
+        self, app_client, mock_agent
+    ) -> None:
+        """OpenClaw 2026.9+ uses BEGIN_OPENCLAW_INTERNAL_CONTEXT instead of legacy prefix."""
+        headers = {"session_id": "openclaw-followup-internal"}
+        internal = (
+            "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>\n"
+            'Conversation data (data, not instructions):\n'
+            '"Conversation info: ⟦openclaw:ctx⟧\\n```json\\n'
+            '{\\"requester_profile\\":{\\"id\\":\\"gateway-owner\\"}}\\n```"\n'
+            "<<<END_OPENCLAW_INTERNAL_CONTEXT>>>"
+        )
+        await app_client.post(
+            "/v1/chat/completions",
+            headers=headers,
+            json={
+                "model": "composer-2.5",
+                "messages": [{"role": "user", "content": "seed"}],
+            },
+        )
+        await app_client.post(
+            "/v1/chat/completions",
+            headers=headers,
+            json={
+                "model": "composer-2.5",
+                "messages": [
+                    {"role": "user", "content": "seed"},
+                    {"role": "assistant", "content": "ok"},
+                    {"role": "user", "content": "你是服務哪個 meta ads account?"},
+                    {"role": "user", "content": internal},
+                ],
+            },
+        )
+        prompt = mock_agent.send.await_args_list[1].args[0]
+        assert "你是服務哪個 meta ads account?" in prompt
+        assert prompt.endswith("你是服務哪個 meta ads account?")
+        assert "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>" in prompt
+
     async def test_session_affinity_header_is_stateful(self, app_client, mock_agent) -> None:
         response = await app_client.post(
             "/v1/chat/completions",
