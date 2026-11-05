@@ -62,6 +62,12 @@ AFFINITY_SESSION_HEADERS = ("session_id", "x-session-affinity")
 USER_ID_HEADER = "X-User-Id"
 EXPOSE_THINKING_HEADER = "X-Cursorpipe-Expose-Thinking"
 
+# OpenClaw channel history envelope (see openclaw history.ts markers).
+HISTORY_CONTEXT_MARKER = "[Chat messages since your last reply - for context]"
+RECENT_HISTORY_CONTEXT_MARKER = "[Recent chat messages - for context]"
+CURRENT_MESSAGE_MARKER = "[Current message - respond to this]"
+OPENCLAW_INTERNAL_CONTEXT_BEGIN = "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>"
+
 
 def _incoming_session_id(request: Request) -> str:
     """Resolve the session id from cursorpipe or OpenClaw affinity headers."""
@@ -84,6 +90,8 @@ def _stateful_prompt(messages: list, *, initial: bool) -> str:
     else:
         prompt, _system = _flatten_messages(_messages_as_dicts(messages))
         prompt = prompt or _followup_prompt(messages)
+        if _has_conversation_context_marker(prompt):
+            prompt = _extract_active_user_instruction(prompt)
     return prepend_account_context(prompt, messages)
 
 
@@ -96,20 +104,47 @@ def _message_text(message) -> str:
     return content
 
 
-def _is_runtime_context(text: str) -> bool:
-    """OpenClaw appends runtime facts after the real user question.
+def _has_conversation_context_marker(text: str) -> bool:
+    return (
+        HISTORY_CONTEXT_MARKER in text
+        or RECENT_HISTORY_CONTEXT_MARKER in text
+        or CURRENT_MESSAGE_MARKER in text
+    )
 
-    Recognize legacy plain-text carriers and 2026.9+ delimited internal context.
-    """
+
+def _is_runtime_context(text: str) -> bool:
+    """True when this user turn is only OpenClaw runtime/tenant injection, not the merchant question."""
     if not text or not text.strip():
         return False
-    if "OpenClaw runtime context:" in text:
-        return True
-    if "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>" in text:
+    # Envelope turns carry the real question even when internal context is prepended in the same blob.
+    if _has_conversation_context_marker(text):
+        return False
+    if OPENCLAW_INTERNAL_CONTEXT_BEGIN in text:
         return True
     if text.strip().startswith("Conversation info: ⟦openclaw:ctx⟧"):
         return True
-    return False
+    if "OpenClaw runtime context for the active user request" in text:
+        return True
+    if "OpenClaw runtime context for the immediately preceding user message" in text:
+        return True
+    if "OpenClaw runtime context (internal):" in text:
+        return True
+    return "OpenClaw runtime context:" in text
+
+
+def _extract_active_user_instruction(text: str) -> str:
+    """Prefer the Current message section over replayed chat history in one user turn."""
+    if not text:
+        return text
+    normalized = text.replace("\r\n", "\n")
+    if CURRENT_MESSAGE_MARKER not in normalized:
+        return text.strip()
+    after = normalized.split(CURRENT_MESSAGE_MARKER, 1)[1].strip()
+    if after.startswith("User:"):
+        after = after[5:].lstrip()
+    elif after.startswith("User："):
+        after = after[5:].lstrip()
+    return after.strip() or text.strip()
 
 
 def _followup_prompt(messages: list) -> str:
@@ -136,7 +171,7 @@ def _followup_prompt(messages: list) -> str:
         for text in user_texts[last_real + 1 :]
         if _is_runtime_context(text) and text.strip()
     ]
-    question = user_texts[last_real]
+    question = _extract_active_user_instruction(user_texts[last_real])
     if not context:
         return question
     return "\n\n".join([*context, question])

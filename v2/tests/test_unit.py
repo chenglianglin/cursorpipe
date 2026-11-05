@@ -629,6 +629,36 @@ class TestFlattenMessages:
         assert sent.index(block) < sent.index("請問 account_id")
         assert "OpenClaw policy" not in sent
 
+    def test_followup_skips_delimited_runtime_and_keeps_envelope_question(self) -> None:
+        from types import SimpleNamespace
+
+        from cursorpipe_server.routes.completions import _stateful_prompt
+
+        runtime = (
+            "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>\n"
+            "OpenClaw runtime context for the active user request in this turn.\n"
+            "<tenant-context>tenant-b</tenant-context>\n"
+            "<<<END_OPENCLAW_INTERNAL_CONTEXT>>>"
+        )
+        envelope = (
+            "[Chat messages since your last reply - for context]\n"
+            "User: hello\n"
+            "Assistant: menu\n"
+            "[Current message - respond to this]\n"
+            "User: 有今天建立的活動嗎?"
+        )
+        messages = [
+            SimpleNamespace(role="user", content="hello"),
+            SimpleNamespace(role="assistant", content="menu"),
+            SimpleNamespace(role="user", content=envelope),
+            SimpleNamespace(role="user", content=runtime),
+        ]
+        sent = _stateful_prompt(messages, initial=False)
+        assert "有今天建立的活動嗎?" in sent
+        assert sent.endswith("有今天建立的活動嗎?")
+        assert "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>" in sent
+        assert "hello" not in sent
+
     def test_followup_prompt_includes_account_context(self) -> None:
         from types import SimpleNamespace
 

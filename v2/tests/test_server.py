@@ -360,6 +360,49 @@ class TestChatCompletionsStateful:
         assert prompt.endswith("你是服務哪個 meta ads account?")
         assert "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>" in prompt
 
+    async def test_followup_keeps_question_ahead_of_delimited_runtime_context(
+        self, app_client, mock_agent
+    ) -> None:
+        headers = {"session_id": "openclaw-followup-delimited"}
+        await app_client.post(
+            "/v1/chat/completions",
+            headers=headers,
+            json={
+                "model": "composer-2.5",
+                "messages": [{"role": "user", "content": "warmup"}],
+            },
+        )
+        envelope = (
+            "[Chat messages since your last reply - for context]\n"
+            "User: warmup\n"
+            "Assistant: ok\n"
+            "[Current message - respond to this]\n"
+            "User: 有今天建立的活動嗎?"
+        )
+        runtime = (
+            "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>\n"
+            "OpenClaw runtime context for the active user request in this turn.\n"
+            "<tenant-context>T123</tenant-context>\n"
+            "<<<END_OPENCLAW_INTERNAL_CONTEXT>>>"
+        )
+        await app_client.post(
+            "/v1/chat/completions",
+            headers=headers,
+            json={
+                "model": "composer-2.5",
+                "messages": [
+                    {"role": "user", "content": "warmup"},
+                    {"role": "assistant", "content": "ok"},
+                    {"role": "user", "content": envelope},
+                    {"role": "user", "content": runtime},
+                ],
+            },
+        )
+        prompt = mock_agent.send.await_args_list[1].args[0]
+        assert prompt.endswith("有今天建立的活動嗎?")
+        assert "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>" in prompt
+        assert "warmup" not in prompt
+
     async def test_session_affinity_header_is_stateful(self, app_client, mock_agent) -> None:
         response = await app_client.post(
             "/v1/chat/completions",
