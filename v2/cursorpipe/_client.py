@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from cursor_sdk import AgentOptions, ModelParameterValue, ModelSelection
+from cursor_sdk import AgentOptions, ModelParameterValue, ModelSelection, SDKImage, UserMessage
 
 from cursorpipe._config import local_agent_options, settings
 
@@ -133,6 +133,49 @@ async def _resolve_run_usage(run) -> "TokenUsage | None":
         return getattr(run, "usage", None)
 
     return None
+
+
+def sdk_images_from_content(content) -> list[SDKImage]:
+    """Turn OpenAI image_url parts into SDK images. Other part types are skipped."""
+    if not isinstance(content, list):
+        return []
+    images: list[SDKImage] = []
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") != "image_url":
+            continue
+        image = _sdk_image_from_url(_image_url_string(block.get("image_url")))
+        if image is not None:
+            images.append(image)
+    return images
+
+
+def _image_url_string(value) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        url = value.get("url")
+        return url.strip() if isinstance(url, str) else ""
+    return ""
+
+
+def _sdk_image_from_url(url: str) -> SDKImage | None:
+    if url.startswith("data:"):
+        header, separator, data = url.partition(",")
+        if not separator or ";base64" not in header.lower() or not data.strip():
+            return None
+        mime = header[5:].split(";", 1)[0].strip() or "application/octet-stream"
+        if not mime.startswith("image/"):
+            return None
+        return SDKImage.from_data(data.strip(), mime)
+    if url.startswith("http://") or url.startswith("https://"):
+        return SDKImage.from_url(url)
+    return None
+
+
+def _outbound_message(text: str, images: list[SDKImage] | None):
+    if images:
+        return UserMessage(text=text or "", images=images)
+    return text
 
 
 def _flatten_messages(messages: list[dict]) -> tuple[str, str]:
@@ -299,6 +342,7 @@ async def complete(
     model: str | None,
     cursor_client: "AsyncClient",
     cursor_params: dict[str, str] | None = None,
+    images: list[SDKImage] | None = None,
 ) -> CompletionResult:
     """One-shot stateless non-streaming completion."""
     effective_model = model or settings.model
@@ -306,7 +350,7 @@ async def complete(
 
     agent = await cursor_client.agents.create(_agent_options(effective_model, cursor_params))
     try:
-        run = await agent.send(prompt)
+        run = await agent.send(_outbound_message(prompt, images))
         text, thinking, thinking_ms = await _collect_messages(run)
 
         result_text = text or getattr(run, "result", "") or ""
@@ -336,6 +380,7 @@ async def stream_complete(
     model: str | None,
     cursor_client: "AsyncClient",
     cursor_params: dict[str, str] | None = None,
+    images: list[SDKImage] | None = None,
     *,
     expose_thinking: bool = False,
 ) -> AsyncIterator[StreamChunk]:
@@ -346,7 +391,7 @@ async def stream_complete(
     has_thinking = bool(cursor_params) or bool(settings.thinking_param)
     agent = await cursor_client.agents.create(_agent_options(effective_model, cursor_params))
     try:
-        run = await agent.send(prompt)
+        run = await agent.send(_outbound_message(prompt, images))
         async for chunk in _stream_run_chunks(
             run,
             include_thinking=expose_thinking and has_thinking,
@@ -366,9 +411,10 @@ async def stream_complete(
 async def complete_stateful(
     session_entry: "SessionEntry",
     last_user_message: str,
+    images: list[SDKImage] | None = None,
 ) -> CompletionResult:
     """Send one turn to a persistent Agent. The SDK holds full history."""
-    run = await session_entry.agent.send(last_user_message)
+    run = await session_entry.agent.send(_outbound_message(last_user_message, images))
     text, thinking, thinking_ms = await _collect_messages(run)
 
     result_text = text or getattr(run, "result", "") or ""
@@ -394,11 +440,12 @@ async def complete_stateful(
 async def stream_complete_stateful(
     session_entry: "SessionEntry",
     last_user_message: str,
+    images: list[SDKImage] | None = None,
     *,
     expose_thinking: bool = False,
 ) -> AsyncIterator[StreamChunk]:
     """Stream one turn to a persistent Agent. Yields StreamChunk objects."""
-    run = await session_entry.agent.send(last_user_message)
+    run = await session_entry.agent.send(_outbound_message(last_user_message, images))
     async for chunk in _stream_run_chunks(
         run,
         include_thinking=expose_thinking and bool(settings.thinking_param),

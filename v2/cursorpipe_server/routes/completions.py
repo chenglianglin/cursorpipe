@@ -96,10 +96,10 @@ def _stateful_prompt(messages: list, *, initial: bool) -> str:
 
 
 def _message_text(message) -> str:
-    content = message.content or ""
+    content = _message_content(message) or ""
     if isinstance(content, list):
         return " ".join(
-            block.get("text", "") for block in content if block.get("type") == "text"
+            block.get("text", "") for block in content if isinstance(block, dict) and block.get("type") == "text"
         )
     return content
 
@@ -145,6 +145,45 @@ def _extract_active_user_instruction(text: str) -> str:
     elif after.startswith("User："):
         after = after[5:].lstrip()
     return after.strip() or text.strip()
+
+
+def _message_content(message):
+    if isinstance(message, dict):
+        return message.get("content")
+    return getattr(message, "content", None)
+
+
+def _user_messages(messages: list) -> list:
+    selected = []
+    for message in messages:
+        role = message.get("role") if isinstance(message, dict) else getattr(message, "role", None)
+        if role == "user":
+            selected.append(message)
+    return selected
+
+
+def _current_user_message(messages: list):
+    """The user turn this reply answers. Runtime-only carriers after it are not the question."""
+    users = _user_messages(messages)
+    if not users:
+        return None
+    last_real = None
+    for index in range(len(users) - 1, -1, -1):
+        if not _is_runtime_context(_message_text(users[index])):
+            last_real = index
+            break
+    if last_real is None:
+        return users[-1]
+    return users[last_real]
+
+
+def _current_turn_images(messages: list):
+    from cursorpipe._client import sdk_images_from_content
+
+    message = _current_user_message(messages)
+    if message is None:
+        return []
+    return sdk_images_from_content(_message_content(message))
 
 
 def _followup_prompt(messages: list) -> str:
@@ -289,6 +328,7 @@ async def _handle_stateless(
     expose_thinking: bool,
 ):
     messages = _messages_as_dicts(body.messages)
+    images = _current_turn_images(messages)
     cursor_params = body.cursor_params or None
 
     if body.stream:
@@ -298,13 +338,14 @@ async def _handle_stateless(
                 model,
                 cursor_client,
                 cursor_params,
+                images=images,
                 expose_thinking=expose_thinking,
                 include_usage=_include_stream_usage(body),
             ),
             media_type="text/event-stream",
         )
 
-    result = await complete(messages, model, cursor_client, cursor_params)
+    result = await complete(messages, model, cursor_client, cursor_params, images=images)
     return JSONResponse(
         ChatCompletionResponse(
             model=result.actual_model or model,
@@ -328,6 +369,7 @@ async def _stateless_stream_generator(
     model: str,
     cursor_client,
     cursor_params: dict[str, str] | None = None,
+    images=None,
     *,
     expose_thinking: bool,
     include_usage: bool = False,
@@ -347,6 +389,7 @@ async def _stateless_stream_generator(
         model,
         cursor_client,
         cursor_params,
+        images=images,
         expose_thinking=expose_thinking,
     ):
         if chunk.type == "usage":
@@ -411,6 +454,7 @@ async def _handle_stateful(
         body.messages,
         initial=await session_store.consume_initial_prompt(entry.session_id),
     )
+    images = _current_turn_images(body.messages)
 
     if body.stream:
         return EventSourceResponse(
@@ -418,6 +462,7 @@ async def _handle_stateful(
                 entry,
                 prompt,
                 model,
+                images=images,
                 expose_thinking=expose_thinking,
                 include_usage=_include_stream_usage(body),
             ),
@@ -425,7 +470,7 @@ async def _handle_stateful(
             headers=response_headers,
         )
 
-    result = await complete_stateful(entry, prompt)
+    result = await complete_stateful(entry, prompt, images=images)
     return JSONResponse(
         content=ChatCompletionResponse(
             model=result.actual_model or model,
@@ -449,6 +494,7 @@ async def _stateful_stream_generator(
     entry,
     last_user_message: str,
     model: str,
+    images=None,
     *,
     expose_thinking: bool,
     include_usage: bool = False,
@@ -465,6 +511,7 @@ async def _stateful_stream_generator(
     async for chunk in stream_complete_stateful(
         entry,
         last_user_message,
+        images=images,
         expose_thinking=expose_thinking,
     ):
         if chunk.type == "usage":

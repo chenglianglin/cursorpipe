@@ -547,6 +547,58 @@ class TestModelCardSchema:
 
 
 # =========================================================================
+# Current-turn images
+# =========================================================================
+
+
+@pytest.mark.unit
+class TestCurrentTurnImages:
+    def test_data_uri_and_https_are_sdk_images(self) -> None:
+        from cursorpipe._client import UserMessage, _outbound_message, sdk_images_from_content
+        from cursorpipe_server.routes.completions import _current_turn_images
+
+        data_url = "data:image/png;base64,aGVsbG8="
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "舊圖"},
+                    {"type": "image_url", "image_url": {"url": "https://example.test/old.png"}},
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "看這張"},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                    {"type": "image_url", "image_url": {"url": "ftp://example.test/nope.png"}},
+                ],
+            },
+        ]
+        images = _current_turn_images(messages)
+        assert len(images) == 1
+        assert images[0].data == "aGVsbG8="
+        assert images[0].mime_type == "image/png"
+        parsed = sdk_images_from_content(messages[1]["content"])
+        assert parsed[0].url is None
+        sent = _outbound_message("看這張", images)
+        assert isinstance(sent, UserMessage)
+        assert sent.text == "看這張"
+        assert sent.images == tuple(images) or list(sent.images) == images
+        assert _outbound_message("只有字", []) == "只有字"
+
+    def test_https_image_keeps_url(self) -> None:
+        from cursorpipe._client import sdk_images_from_content
+
+        images = sdk_images_from_content(
+            [{"type": "image_url", "image_url": "https://example.test/shot.png"}]
+        )
+        assert len(images) == 1
+        assert images[0].url == "https://example.test/shot.png"
+        assert images[0].data is None
+
+
+# =========================================================================
 # _flatten_messages
 # =========================================================================
 
@@ -593,6 +645,7 @@ class TestFlattenMessages:
         prompt, _ = self._flatten(messages)
         assert "Part one" in prompt
         assert "part two" in prompt
+        assert "ignored" not in prompt
 
     def test_none_content_treated_as_empty(self) -> None:
         messages = [{"role": "user", "content": None}]
